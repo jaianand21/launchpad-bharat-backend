@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+
+# Environment variables — NEVER commit these (contains JWT_SECRET, API keys)
+.env
+.env.local
+.env.production
+
+# Database files — contains real user data, do NOT commit
+database.sqlite
+*.sqlite
+*.sqlite3
+
+# Excel exports — contain real user/lead data
+*.xlsx
+leads_database.xlsx
+users_database.xlsx
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
