@@ -10,7 +10,7 @@ export const initScheduler = () => {
   });
 };
 
-export const manuallySyncAllDocuments = () => {
+export const manuallySyncAllDocuments = async () => {
   try {
     const docs = db.prepare('SELECT * FROM documents WHERE is_active = 1').all();
 
