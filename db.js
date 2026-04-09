@@ -71,8 +71,8 @@ export const initDb = () => {
     `).run();
 
     // Seed database if empty
-    const count = db.prepare('SELECT COUNT(*) as count FROM documents').get().count;
-    if (count === 0) {
+    const countRow = db.prepare('SELECT COUNT(*) as count FROM documents').get();
+    if (countRow.count === 0) {
         const seedDocs = [
             {
                 title: 'GST Registration Manual',
@@ -94,15 +94,14 @@ export const initDb = () => {
                 category: 'Legal & Documentation',
                 url: 'https://www.startupindia.gov.in/content/dam/invest-india/Templates/public/Founders_Agreement.pdf',
                 fallback: '/mock-pdfs/founder-agreement.pdf'
-            joined_at DATETIME DEFAULT CURRENT_TIMESTAMP
-          )
-        `, (err) => {
-          if (err) return reject(err);
-          resolve();
-        });
-      });
-    });
-  });
+            }
+        ];
+        
+        const stmt = db.prepare('INSERT INTO documents (title, description, category, official_source_url, fallback_file_url) VALUES (?, ?, ?, ?, ?)');
+        for (const d of seedDocs) {
+            stmt.run(d.title, d.description, d.category, d.url, d.fallback);
+        }
+    }
 };
 
 export default db;
