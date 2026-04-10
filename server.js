@@ -12,6 +12,7 @@ import { fileURLToPath } from 'url';
 import { supabase, initDb } from './db.js';
 import { initScheduler, manuallySyncAllDocuments } from './scheduler.js';
 import { sendOtpSms } from './smsService.js';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -28,6 +29,10 @@ process.on('unhandledRejection', (reason) => {
 const app = express();
 const PORT = process.env.PORT || 5000;
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+
+// Initialize Gemini AI
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+const aiModel = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
 // ── In-memory password reset codes (code → { email, expiry }) ────────────────
 const resetCodes = new Map();
@@ -529,6 +534,60 @@ app.post('/api/documents/sync', (req, res) => {
   console.log('[API] Admin authorized manual synchronization sweep across all Founder Documents.');
   manuallySyncAllDocuments();
   res.json({ success: true, message: 'Sync queued successfully' });
+});
+
+// --- AI Blueprint Generator ---
+
+app.post('/api/generate-blueprint', async (req, res) => {
+  const { skills, niches, budget } = req.body;
+  
+  if (!skills || !niches || !budget) {
+    return res.status(400).json({ error: 'Skills, Niches, and Budget are required to build a blueprint.' });
+  }
+
+  const prompt = `
+    You are a professional Venture Capitalist and Startup Architect specializing in the Indian market.
+    Develop a high-quality, logical, and UNIQUE startup idea for a founder with these parameters:
+    - User Skills: ${skills}
+    - Target Niche: ${niches}
+    - Starting Capital: ₹${budget}
+
+    Return the response strictly as a JSON object with these EXACT keys (no extra text, no markdown backticks):
+    {
+      "name": "Creative & Catchy Startup Name",
+      "overview": "What exactly the startup does in 2 sentences.",
+      "problem": "The specific real-world pain point being solved in India.",
+      "solution": "How this startup solves that problem uniquely.",
+      "future_scope": "Vision for the next 5 years and how it can scale.",
+      "revenue_model": "3 specific ways this business will make money.",
+      "tech_stack": "Recommended technology for an MVP based on the budget.",
+      "roadmap": [
+        "Month 1 text",
+        "Month 2 text",
+        "Month 3 text",
+        "Month 4 text",
+        "Month 5 text",
+        "Month 6 text"
+      ]
+    }
+
+    Ensure the idea is practical for India, takes the budget into account, and leverages the skills mentioned. 
+    Every response must be unique and different from previous ones.
+  `;
+
+  try {
+    const result = await aiModel.generateContent(prompt);
+    const responseText = result.response.text();
+    
+    // Clean up response if AI included markdown backticks
+    const cleanJson = responseText.replace(/```json|```/gi, '').trim();
+    const blueprintData = JSON.parse(cleanJson);
+
+    res.json(blueprintData);
+  } catch (err) {
+    console.error('[AI] Blueprint Generation Error:', err.message);
+    res.status(500).json({ error: 'AI failed to generate blueprint. Please try again.' });
+  }
 });
 
 app.post('/api/auth/logout', (req, res) => {
