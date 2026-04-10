@@ -546,20 +546,23 @@ app.post('/api/generate-blueprint', async (req, res) => {
   }
 
   const prompt = `
-    You are a professional Venture Capitalist and Startup Architect specializing in the Indian market.
-    Develop a high-quality, logical, and UNIQUE startup idea for a founder with these parameters:
+    You are an eccentric, brilliant Venture Capitalist and disruptive Startup Architect in India.
+    Do NOT give me boring, generic ideas. I want OUT OF THE BOX, unconventional, and disruptive startup ideas.
+    Think of unexploited white spaces, cross-disciplinary concepts, and massive untapped tier-2/3 market nuances.
+    
+    Develop a highly creative, unorthodox, yet logically explosive startup idea for a founder with these parameters:
     - User Skills: ${skills}
     - Target Niche: ${niches}
     - Starting Capital: ₹${budget}
 
-    Return the response strictly as a JSON object with these EXACT keys (no extra text, no markdown backticks):
+    Return the response strictly as a JSON object with these EXACT keys:
     {
       "name": "Creative & Catchy Startup Name",
-      "overview": "What exactly the startup does in 2 sentences.",
-      "problem": "The specific real-world pain point being solved in India.",
-      "solution": "How this startup solves that problem uniquely.",
-      "future_scope": "Vision for the next 5 years and how it can scale.",
-      "revenue_model": "3 specific ways this business will make money.",
+      "overview": "What exactly the startup does in 2 sentences (must sound highly disruptive).",
+      "problem": "The hidden or ignored real-world pain point being solved in India.",
+      "solution": "The out-of-the-box, unconventional way this startup solves that problem.",
+      "future_scope": "Crazy but achievable vision for the next 5 years and how it scales massively.",
+      "revenue_model": "3 highly specific and clever ways this business will make money.",
       "tech_stack": "Recommended technology for an MVP based on the budget.",
       "roadmap": [
         "Month 1 text",
@@ -571,17 +574,20 @@ app.post('/api/generate-blueprint', async (req, res) => {
       ]
     }
 
-    Ensure the idea is practical for India, takes the budget into account, and leverages the skills mentioned. 
-    Every response must be unique and different from previous ones.
+    Ensure the idea leverages the user's specific skills in a completely unexpected way. Push the boundaries!
   `;
 
   try {
-    const result = await aiModel.generateContent(prompt);
+    const result = await aiModel.generateContent({
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      generationConfig: {
+        temperature: 1.3, // High temperature for maximum creativity
+        responseMimeType: "application/json" // Force strict JSON output
+      }
+    });
+
     const responseText = result.response.text();
-    
-    // Clean up response if AI included markdown backticks
-    const cleanJson = responseText.replace(/```json|```/gi, '').trim();
-    const blueprintData = JSON.parse(cleanJson);
+    const blueprintData = JSON.parse(responseText);
 
     res.json(blueprintData);
   } catch (err) {
