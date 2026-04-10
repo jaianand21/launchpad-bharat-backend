@@ -65,7 +65,11 @@ const syncLeadsToExcel = () => {
 };
 
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+  origin: [
+    process.env.FRONTEND_URL, 
+    'https://launchpad-bharat.vercel.app',
+    'http://localhost:5173'
+  ].filter(Boolean),
   credentials: true
 }));
 
@@ -343,6 +347,7 @@ app.get('/api/admin/export-users', (req, res) => {
 // ── Lead Capture (Welcome Modal) ─────────────────────────────────────────────
 app.post('/api/leads', async (req, res) => {
   const { name, email, mobile, joinedAt } = req.body;
+  console.log(`[LEAD] Incoming lead capture: ${name} (${email})`);
   if (!name || !email || !mobile) return res.status(400).json({ error: 'Missing lead info' });
 
   try {
