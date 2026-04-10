@@ -547,8 +547,10 @@ app.post('/api/generate-blueprint', async (req, res) => {
 
   const prompt = `
     You are an eccentric, brilliant Venture Capitalist and disruptive Startup Architect in India.
+    ACTIVATE TREND ANALYSIS: Scan your vast knowledge base for highly successful, cutting-edge FOREIGN startup models (from the US, Europe, or China) that are currently NOT implemented in India yet.
+    
+    Take that foreign concept and give it a localized "Indian Touch" (Desi ingenuity, WhatsApp-first nature, high trust requirements, etc.). 
     Do NOT give me boring, generic ideas. I want OUT OF THE BOX, unconventional, and disruptive startup ideas.
-    Think of unexploited white spaces, cross-disciplinary concepts, and massive untapped tier-2/3 market nuances.
     
     Develop a highly creative, unorthodox, yet logically explosive startup idea for a founder with these parameters:
     - User Skills: ${skills}
@@ -558,9 +560,9 @@ app.post('/api/generate-blueprint', async (req, res) => {
     Return the response strictly as a JSON object with these EXACT keys:
     {
       "name": "Creative & Catchy Startup Name",
-      "overview": "What exactly the startup does in 2 sentences (must sound highly disruptive).",
+      "overview": "What exactly the startup does in 2 sentences (Must sound highly disruptive. Mention the foreign inspiration behind it).",
       "problem": "The hidden or ignored real-world pain point being solved in India.",
-      "solution": "The out-of-the-box, unconventional way this startup solves that problem.",
+      "solution": "The out-of-the-box, unconventional way this startup solves that problem with an Indian Touch.",
       "future_scope": "Crazy but achievable vision for the next 5 years and how it scales massively.",
       "revenue_model": "3 highly specific and clever ways this business will make money.",
       "tech_stack": "Recommended technology for an MVP based on the budget.",
