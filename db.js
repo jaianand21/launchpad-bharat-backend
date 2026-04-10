@@ -1,107 +1,59 @@
-import Database from 'better-sqlite3';
-import { dirname, join } from 'path';
-import { fileURLToPath } from 'url';
+import { createClient } from '@supabase/supabase-js';
+import dotenv from 'dotenv';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const dbPath = join(__dirname, 'database.sqlite');
+dotenv.config();
 
-// Initialize database in synchronous mode (better-sqlite3 style)
-const db = new Database(dbPath);
-db.pragma('journal_mode = WAL'); // High performance mode
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_KEY;
 
-export const initDb = () => {
-    // Create users table
-    db.prepare(`
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT,
-            email TEXT UNIQUE,
-            mobile_number TEXT UNIQUE,
-            google_id TEXT UNIQUE,
-            profile_picture TEXT,
-            auth_provider TEXT NOT NULL,
-            password_hash TEXT,
-            is_mobile_verified BOOLEAN DEFAULT 0,
-            business_stage TEXT,
-            business_type TEXT,
-            goal TEXT,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-    `).run();
+if (!supabaseUrl || !supabaseKey) {
+  console.error('❌ CRITICAL: Missing SUPABASE_URL or SUPABASE_KEY in environment variables.');
+}
 
-    // Create leads table
-    db.prepare(`
-        CREATE TABLE IF NOT EXISTS leads (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            email TEXT UNIQUE NOT NULL,
-            mobile TEXT NOT NULL,
-            joined_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-    `).run();
+// Initialize the Supabase client
+export const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Create otps table
-    db.prepare(`
-        CREATE TABLE IF NOT EXISTS otps (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            mobile_number TEXT NOT NULL,
-            otp_hash TEXT NOT NULL,
-            expires_at DATETIME NOT NULL,
-            attempt_count INTEGER DEFAULT 0,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-    `).run();
+// Legacy export compatibility (though we should migrate all to 'supabase' export)
+export default supabase;
 
-    // Create documents table
-    db.prepare(`
-        CREATE TABLE IF NOT EXISTS documents (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          title TEXT NOT NULL,
-          description TEXT NOT NULL,
-          category TEXT NOT NULL,
-          official_source_url TEXT NOT NULL,
-          fallback_file_url TEXT,
-          last_checked_at DATETIME,
-          last_updated_at DATETIME,
-          content_hash_cache TEXT,
-          version INTEGER DEFAULT 1,
-          is_active BOOLEAN DEFAULT 1
-        )
-    `).run();
+// Supabase creates its own tables via the SQL Editor, so initDb is mostly for seeding or logging
+export const initDb = async () => {
+    console.log('✅ Supabase Client ready. Ensure your tables are created in the Supabase SQL Editor.');
+    
+    // Check if documents table needs seeding
+    const { data: documents, error } = await supabase.from('documents').select('id').limit(1);
+    
+    if (error) {
+        console.error('❌ Error checking documents table:', error.message);
+        return;
+    }
 
-    // Seed database if empty
-    const countRow = db.prepare('SELECT COUNT(*) as count FROM documents').get();
-    if (countRow.count === 0) {
+    if (documents.length === 0) {
+        console.log('🌱 Seeding initial documents...');
         const seedDocs = [
             {
                 title: 'GST Registration Manual',
                 description: 'Official step-by-step PDF to register for GST.',
                 category: 'Government Schemes',
-                url: 'https://cbic-gst.gov.in/pdf/registration-manual.pdf',
-                fallback: '/mock-pdfs/gst-registration.pdf'
+                official_source_url: 'https://cbic-gst.gov.in/pdf/registration-manual.pdf',
+                fallback_file_url: '/mock-pdfs/gst-registration.pdf'
             },
             {
                 title: 'Mudra Loan Application',
                 description: 'Blank official form for Mudra bank loans.',
                 category: 'Government Schemes',
-                url: 'https://www.mudra.org.in/pdf/MUDRA-Application-Form.pdf',
-                fallback: '/mock-pdfs/mudra-loan.pdf'
+                official_source_url: 'https://www.mudra.org.in/pdf/MUDRA-Application-Form.pdf',
+                fallback_file_url: '/mock-pdfs/mudra-loan.pdf'
             },
             {
                 title: 'Founder Agreement Template',
                 description: 'Standard NDA and Equity Split agreement.',
                 category: 'Legal & Documentation',
-                url: 'https://www.startupindia.gov.in/content/dam/invest-india/Templates/public/Founders_Agreement.pdf',
-                fallback: '/mock-pdfs/founder-agreement.pdf'
+                official_source_url: 'https://www.startupindia.gov.in/content/dam/invest-india/Templates/public/Founders_Agreement.pdf',
+                fallback_file_url: '/mock-pdfs/founder-agreement.pdf'
             }
         ];
         
-        const stmt = db.prepare('INSERT INTO documents (title, description, category, official_source_url, fallback_file_url) VALUES (?, ?, ?, ?, ?)');
-        for (const d of seedDocs) {
-            stmt.run(d.title, d.description, d.category, d.url, d.fallback);
-        }
+        await supabase.from('documents').insert(seedDocs);
     }
 };
-
-export default db;

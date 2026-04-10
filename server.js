@@ -9,7 +9,7 @@ import * as XLSX from 'xlsx';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import db, { initDb } from './db.js';
+import { supabase, initDb } from './db.js';
 import { initScheduler, manuallySyncAllDocuments } from './scheduler.js';
 import { sendOtpSms } from './smsService.js';
 
@@ -33,10 +33,15 @@ const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 const resetCodes = new Map();
 
 // Helper: sync all users to Excel file
-const syncUsersToExcel = () => {
+const syncUsersToExcel = async () => {
   try {
-    const rows = db.prepare('SELECT id, name, email, mobile_number, auth_provider, business_stage, business_type, goal, created_at, last_login FROM users').all();
-    if (rows.length === 0) return;
+    const { data: rows, error } = await supabase
+      .from('users')
+      .select('id, name, email, mobile_number, auth_provider, business_stage, business_type, goal, created_at, last_login');
+    
+    if (error) throw error;
+    if (!rows || rows.length === 0) return;
+
     const ws = XLSX.utils.json_to_sheet(rows);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Users');
@@ -49,10 +54,16 @@ const syncUsersToExcel = () => {
 };
 
 // Helper: sync all leads to Excel file
-const syncLeadsToExcel = () => {
+const syncLeadsToExcel = async () => {
   try {
-    const rows = db.prepare('SELECT * FROM leads ORDER BY joined_at DESC').all();
-    if (rows.length === 0) return;
+    const { data: rows, error } = await supabase
+      .from('leads')
+      .select('*')
+      .order('joined_at', { ascending: false });
+    
+    if (error) throw error;
+    if (!rows || rows.length === 0) return;
+
     const ws = XLSX.utils.json_to_sheet(rows);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Leads');
@@ -104,9 +115,16 @@ app.post('/api/auth/send-otp', async (req, res) => {
   }
 
   try {
-    const row = db.prepare('SELECT COUNT(*) as count FROM otps WHERE mobile_number = ? AND created_at > datetime("now", "-15 minutes")').get(mobile_number);
+    // Check for recent OTP requests (flood protection)
+    const fifteenMinsAgo = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+    const { count, error: countError } = await supabase
+      .from('otps')
+      .select('*', { count: 'exact', head: true })
+      .eq('mobile_number', mobile_number)
+      .gt('created_at', fifteenMinsAgo);
     
-    if (row.count >= 3) {
+    if (countError) throw countError;
+    if (count >= 3) {
       return res.status(429).json({ error: 'Too many OTP requests. Please wait 15 minutes.' });
     }
 
@@ -114,12 +132,16 @@ app.post('/api/auth/send-otp', async (req, res) => {
     const hashedOtp = await bcrypt.hash(plainOtp, 10);
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
 
-    db.prepare('INSERT INTO otps (mobile_number, otp_hash, expires_at) VALUES (?, ?, ?)').run(mobile_number, hashedOtp, expiresAt);
+    const { error: insertError } = await supabase
+      .from('otps')
+      .insert({ mobile_number, otp_hash: hashedOtp, expires_at: expiresAt });
+
+    if (insertError) throw insertError;
 
     const smsResult = await sendOtpSms(mobile_number, plainOtp);
 
     if (!smsResult.success) {
-      db.prepare('DELETE FROM otps WHERE mobile_number = ? AND otp_hash = ?').run(mobile_number, hashedOtp);
+      await supabase.from('otps').delete().eq('mobile_number', mobile_number).eq('otp_hash', hashedOtp);
       return res.status(502).json({ error: `SMS failed: ${smsResult.error}` });
     }
 
@@ -135,7 +157,15 @@ app.post('/api/auth/verify-otp', async (req, res) => {
   if (!mobile_number || !otp) return res.status(400).json({ error: 'Mobile and OTP required' });
 
   try {
-    const otpRecord = db.prepare('SELECT * FROM otps WHERE mobile_number = ? ORDER BY created_at DESC LIMIT 1').get(mobile_number);
+    const { data: otpRecord, error: otpError } = await supabase
+      .from('otps')
+      .select('*')
+      .eq('mobile_number', mobile_number)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (otpError) throw otpError;
     if (!otpRecord) return res.status(400).json({ error: 'No OTP requested' });
 
     if (new Date() > new Date(otpRecord.expires_at)) {
@@ -148,21 +178,39 @@ app.post('/api/auth/verify-otp', async (req, res) => {
 
     const isValid = await bcrypt.compare(otp.toString(), otpRecord.otp_hash);
     if (!isValid) {
-      db.prepare('UPDATE otps SET attempt_count = attempt_count + 1 WHERE id = ?').run(otpRecord.id);
+      await supabase
+        .from('otps')
+        .update({ attempt_count: otpRecord.attempt_count + 1 })
+        .eq('id', otpRecord.id);
       return res.status(400).json({ error: 'Invalid OTP' });
     }
 
-    db.prepare('DELETE FROM otps WHERE mobile_number = ?').run(mobile_number);
+    await supabase.from('otps').delete().eq('mobile_number', mobile_number);
 
-    let user = db.prepare('SELECT * FROM users WHERE mobile_number = ?').get(mobile_number);
+    let { data: user, error: userError } = await supabase
+      .from('users')
+      .select('*')
+      .eq('mobile_number', mobile_number)
+      .maybeSingle();
+
+    if (userError) throw userError;
 
     if (user) {
       const isNewOrIncomplete = !user.business_stage;
-      db.prepare('UPDATE users SET is_mobile_verified = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(user.id);
-      issueToken(res, user.id, isNewOrIncomplete, user.email, user.name, user.profile_picture);
+      await supabase
+        .from('users')
+        .update({ is_mobile_verified: true, updated_at: new Date().toISOString() })
+        .eq('id', user.id);
+      await issueToken(res, user.id, isNewOrIncomplete, user.email, user.name, user.profile_picture);
     } else {
-      const info = db.prepare('INSERT INTO users (mobile_number, auth_provider, is_mobile_verified) VALUES (?, ?, 1)').run(mobile_number, 'otp');
-      issueToken(res, info.lastInsertRowid, true, null, null, null);
+      const { data: newUser, error: createError } = await supabase
+        .from('users')
+        .insert({ mobile_number, auth_provider: 'otp', is_mobile_verified: true })
+        .select()
+        .single();
+      
+      if (createError) throw createError;
+      await issueToken(res, newUser.id, true, null, null, null);
     }
   } catch (err) {
     console.error('[VERIFY-OTP] Error:', err.message);
@@ -170,11 +218,14 @@ app.post('/api/auth/verify-otp', async (req, res) => {
   }
 });
 
-const issueToken = (res, userId, isNewOrIncomplete, email, name, picture) => {
+const issueToken = async (res, userId, isNewOrIncomplete, email, name, picture) => {
   const token = jwt.sign({ userId }, process.env.JWT_SECRET, { expiresIn: '7d' });
   
   try {
-    db.prepare('UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?').run(userId);
+    await supabase
+      .from('users')
+      .update({ last_login: new Date().toISOString() })
+      .eq('id', userId);
   } catch (err) {
     console.error('IssueToken DB Error:', err.message);
   }
@@ -199,12 +250,18 @@ app.post('/api/auth/signup', async (req, res) => {
     if (!name || !emailOrPhone || !password) return res.status(400).json({ error: 'All fields required' });
 
     const hash = await bcrypt.hash(String(password), 10);
-    const info = db.prepare('INSERT INTO users (name, email, auth_provider, password_hash) VALUES (?, ?, ?, ?)').run(name, emailOrPhone, 'email', hash);
+    const { data: user, error: signupError } = await supabase
+      .from('users')
+      .insert({ name, email: emailOrPhone, auth_provider: 'email', password_hash: hash })
+      .select()
+      .single();
     
-    issueToken(res, info.lastInsertRowid, true, emailOrPhone, name, null);
+    if (signupError) throw signupError;
+    
+    await issueToken(res, user.id, true, emailOrPhone, name, null);
     setTimeout(syncUsersToExcel, 500);
   } catch (err) {
-    if (err.message.includes('UNIQUE')) return res.status(400).json({ error: 'Email exists' });
+    if (err.message && err.message.includes('unique')) return res.status(400).json({ error: 'Email exists' });
     res.status(500).json({ error: 'Signup failed' });
   }
 });
@@ -212,14 +269,20 @@ app.post('/api/auth/signup', async (req, res) => {
 app.post('/api/auth/login', async (req, res) => {
   const { email, password } = req.body;
   try {
-    const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+    const { data: user, error: loginError } = await supabase
+      .from('users')
+      .select('*')
+      .eq('email', email)
+      .maybeSingle();
+
+    if (loginError) throw loginError;
     if (!user) return res.status(400).json({ error: 'No account' });
     if (!user.password_hash) return res.status(400).json({ error: 'Use Google Login' });
 
     const isValid = await bcrypt.compare(String(password), user.password_hash);
     if (!isValid) return res.status(400).json({ error: 'Wrong password' });
 
-    issueToken(res, user.id, !user.business_stage, user.email, user.name, user.profile_picture);
+    await issueToken(res, user.id, !user.business_stage, user.email, user.name, user.profile_picture);
   } catch (err) {
     res.status(500).json({ error: 'Login error' });
   }
@@ -241,23 +304,48 @@ app.post('/api/auth/google', async (req, res) => {
     }
 
     const { sub: google_id, email, name, picture } = payload;
-    let user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+    let { data: user, error: searchError } = await supabase
+      .from('users')
+      .select('*')
+      .eq('email', email)
+      .maybeSingle();
+
+    if (searchError) throw searchError;
 
     if (user) {
-      db.prepare('UPDATE users SET google_id = ?, profile_picture = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(google_id, picture, user.id);
-      issueToken(res, user.id, !user.business_stage, email, name, picture);
+      const { data: updatedUser, error: updateError } = await supabase
+        .from('users')
+        .update({ google_id, profile_picture: picture, updated_at: new Date().toISOString() })
+        .eq('id', user.id)
+        .select()
+        .single();
+      
+      if (updateError) throw updateError;
+      await issueToken(res, updatedUser.id, !updatedUser.business_stage, email, name, picture);
     } else {
-      const info = db.prepare('INSERT INTO users (name, email, google_id, profile_picture, auth_provider) VALUES (?, ?, ?, ?, ?)').run(name, email, google_id, picture, 'google');
-      issueToken(res, info.lastInsertRowid, true, email, name, picture);
+      const { data: newUser, error: createError } = await supabase
+        .from('users')
+        .insert({ name, email, google_id, profile_picture: picture, auth_provider: 'google' })
+        .select()
+        .single();
+      
+      if (createError) throw createError;
+      await issueToken(res, newUser.id, true, email, name, picture);
     }
   } catch (error) {
     res.status(401).json({ error: 'Google Login failed' });
   }
 });
 
-app.get('/api/auth/me', requireAuth, (req, res) => {
+app.get('/api/auth/me', requireAuth, async (req, res) => {
   try {
-    const user = db.prepare('SELECT id, name, email, mobile_number, profile_picture, auth_provider, business_stage, business_type, goal, created_at, last_login FROM users WHERE id = ?').get(req.userId);
+    const { data: user, error } = await supabase
+      .from('users')
+      .select('id, name, email, mobile_number, profile_picture, auth_provider, business_stage, business_type, goal, created_at, last_login')
+      .eq('id', req.userId)
+      .maybeSingle();
+
+    if (error) throw error;
     if (!user) return res.status(404).json({ error: 'User not found' });
     res.json({ user, isOnboarded: !!user.business_stage });
   } catch (err) {
@@ -266,27 +354,42 @@ app.get('/api/auth/me', requireAuth, (req, res) => {
 });
 
 // Update user profile fields
-app.put('/api/user/profile', requireAuth, (req, res) => {
+app.put('/api/user/profile', requireAuth, async (req, res) => {
   const { name, business_stage, business_type, goal } = req.body;
   if (!name?.trim()) return res.status(400).json({ error: 'Name required' });
 
   try {
-    db.prepare(`UPDATE users SET name = ?, business_stage = ?, business_type = ?, goal = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
-      .run(name.trim(), business_stage || null, business_type || null, goal || null, req.userId);
+    const { data: user, error: updateError } = await supabase
+      .from('users')
+      .update({ 
+        name: name.trim(), 
+        business_stage: business_stage || null, 
+        business_type: business_type || null, 
+        goal: goal || null, 
+        updated_at: new Date().toISOString() 
+      })
+      .eq('id', req.userId)
+      .select()
+      .single();
     
-    const user = db.prepare('SELECT id, name, email, mobile_number, profile_picture, auth_provider, business_stage, business_type, goal FROM users WHERE id = ?').get(req.userId);
+    if (updateError) throw updateError;
     res.json({ success: true, user });
   } catch (err) {
     res.status(500).json({ error: 'Update failed' });
   }
 });
 
-app.post('/api/auth/onboard', requireAuth, (req, res) => {
+app.post('/api/auth/onboard', requireAuth, async (req, res) => {
   const { business_stage, business_type, goal } = req.body;
   if (!business_stage || !business_type || !goal) return res.status(400).json({ error: 'Missing fields' });
 
   try {
-    db.prepare('UPDATE users SET business_stage = ?, business_type = ?, goal = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(business_stage, business_type, goal, req.userId);
+    const { error: onboardError } = await supabase
+      .from('users')
+      .update({ business_stage, business_type, goal, updated_at: new Date().toISOString() })
+      .eq('id', req.userId);
+    
+    if (onboardError) throw onboardError;
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: 'Onboarding failed' });
@@ -299,7 +402,13 @@ app.post('/api/auth/forgot-password', async (req, res) => {
   if (!email) return res.status(400).json({ error: 'Email required' });
 
   try {
-    const user = db.prepare('SELECT id, name FROM users WHERE email = ?').get(email);
+    const { data: user, error: userError } = await supabase
+      .from('users')
+      .select('id, name')
+      .eq('email', email)
+      .maybeSingle();
+
+    if (userError) throw userError;
     if (!user) return res.status(400).json({ error: 'No user' });
 
     const code = Math.floor(100000 + Math.random() * 900000).toString();
@@ -321,7 +430,12 @@ app.post('/api/auth/reset-password', async (req, res) => {
 
   try {
     const hash = await bcrypt.hash(String(newPassword), 10);
-    db.prepare('UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE email = ?').run(hash, email);
+    const { error: resetError } = await supabase
+      .from('users')
+      .update({ password_hash: hash, updated_at: new Date().toISOString() })
+      .eq('email', email);
+    
+    if (resetError) throw resetError;
     resetCodes.delete(email);
     res.json({ success: true });
   } catch (err) {
@@ -330,10 +444,14 @@ app.post('/api/auth/reset-password', async (req, res) => {
 });
 
 // ── Download Users as Excel ───────────────────────────────────────────────────
-app.get('/api/admin/export-users', (req, res) => {
+app.get('/api/admin/export-users', async (req, res) => {
   try {
-    const rows = db.prepare('SELECT id, name, email, mobile_number, auth_provider, business_stage, business_type, goal, created_at, last_login FROM users').all();
-    const ws = XLSX.utils.json_to_sheet(rows);
+    const { data: rows, error } = await supabase
+      .from('users')
+      .select('id, name, email, mobile_number, auth_provider, business_stage, business_type, goal, created_at, last_login');
+    
+    if (error) throw error;
+    const ws = XLSX.utils.json_to_sheet(rows || []);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Users');
     const filePath = path.join(__dirname, 'users_database.xlsx');
@@ -351,14 +469,16 @@ app.post('/api/leads', async (req, res) => {
   if (!name || !email || !mobile) return res.status(400).json({ error: 'Missing lead info' });
 
   try {
-    db.prepare(`
-      INSERT INTO leads (name, email, mobile, joined_at) 
-      VALUES (?, ?, ?, ?)
-      ON CONFLICT(email) DO UPDATE SET 
-        name = excluded.name,
-        mobile = excluded.mobile,
-        joined_at = excluded.joined_at
-    `).run(name.trim(), email.trim(), mobile.trim(), joinedAt || new Date().toISOString());
+    const { error: upsertError } = await supabase
+      .from('leads')
+      .upsert({ 
+        name: name.trim(), 
+        email: email.trim(), 
+        mobile: mobile.trim(), 
+        joined_at: joinedAt || new Date().toISOString() 
+      }, { onConflict: 'email' });
+    
+    if (upsertError) throw upsertError;
     
     setTimeout(syncLeadsToExcel, 300);
     res.json({ success: true });
@@ -369,10 +489,15 @@ app.post('/api/leads', async (req, res) => {
 });
 
 // ── Download Leads as Excel ───────────────────────────────────────────────────
-app.get('/api/admin/export-leads', (req, res) => {
+app.get('/api/admin/export-leads', async (req, res) => {
   try {
-    const rows = db.prepare('SELECT * FROM leads ORDER BY joined_at DESC').all();
-    const ws = XLSX.utils.json_to_sheet(rows);
+    const { data: rows, error } = await supabase
+      .from('leads')
+      .select('*')
+      .order('joined_at', { ascending: false });
+    
+    if (error) throw error;
+    const ws = XLSX.utils.json_to_sheet(rows || []);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Leads');
     const filePath = path.join(__dirname, 'leads_database.xlsx');
@@ -383,16 +508,16 @@ app.get('/api/admin/export-leads', (req, res) => {
   }
 });
 
-app.post('/api/auth/logout', (req, res) => {
-  res.clearCookie('auth_token');
-  res.json({ success: true, message: 'Session destroyed securely' });
-});
-
 // --- Founder Library Document Routes ---
 
-app.get('/api/documents', (req, res) => {
+app.get('/api/documents', async (req, res) => {
   try {
-    const rows = db.prepare('SELECT * FROM documents WHERE is_active = 1').all();
+    const { data: rows, error } = await supabase
+      .from('documents')
+      .select('*')
+      .eq('is_active', true);
+    
+    if (error) throw error;
     res.json(rows);
   } catch (err) {
     res.status(500).json({ error: 'Docs fetch failed' });
@@ -406,13 +531,22 @@ app.post('/api/documents/sync', (req, res) => {
   res.json({ success: true, message: 'Sync queued successfully' });
 });
 
-// Start server synchronously after initDb
-try {
-  initDb();
-  console.log('✅ SQLite Database initialized securely.');
-  initScheduler();
-  app.listen(PORT, () => console.log(`🚀 API Server running on port ${PORT}`));
-} catch (err) {
-  console.error('❌ Startup failed:', err);
-  process.exit(1);
-}
+app.post('/api/auth/logout', (req, res) => {
+  res.clearCookie('auth_token');
+  res.json({ success: true, message: 'Session destroyed securely' });
+});
+
+// Start server after initDb
+const startServer = async () => {
+  try {
+    await initDb();
+    console.log('✅ Supabase Cloud Database connected and initialized.');
+    initScheduler();
+    app.listen(PORT, () => console.log(`🚀 API Server running on port ${PORT}`));
+  } catch (err) {
+    console.error('❌ Startup failed:', err);
+    process.exit(1);
+  }
+};
+
+startServer();

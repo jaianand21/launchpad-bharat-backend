@@ -1,6 +1,6 @@
 import cron from 'node-cron';
 import axios from 'axios';
-import db from './db.js';
+import { supabase } from './db.js';
 
 // Executes every 24 hours at midnight
 export const initScheduler = () => {
@@ -12,7 +12,12 @@ export const initScheduler = () => {
 
 export const manuallySyncAllDocuments = async () => {
   try {
-    const docs = db.prepare('SELECT * FROM documents WHERE is_active = 1').all();
+    const { data: docs, error: fetchError } = await supabase
+      .from('documents')
+      .select('*')
+      .eq('is_active', true);
+
+    if (fetchError) throw fetchError;
 
     for (const doc of docs) {
       try {
@@ -27,18 +32,28 @@ export const manuallySyncAllDocuments = async () => {
 
         if (doc.content_hash_cache !== compositeHash) {
           console.log(`[SYNCHRONIZER] 🚨 UPDATE DETECTED for ${doc.title}!`);
-          db.prepare(`
-            UPDATE documents 
-            SET content_hash_cache = ?, last_updated_at = CURRENT_TIMESTAMP, last_checked_at = CURRENT_TIMESTAMP, version = version + 1 
-            WHERE id = ?
-          `).run(compositeHash, doc.id);
+          await supabase
+            .from('documents')
+            .update({ 
+              content_hash_cache: compositeHash, 
+              last_updated_at: new Date().toISOString(), 
+              last_checked_at: new Date().toISOString(), 
+              version: doc.version + 1 
+            })
+            .eq('id', doc.id);
         } else {
           console.log(`[SYNCHRONIZER] Source identical for ${doc.title}.`);
-          db.prepare('UPDATE documents SET last_checked_at = CURRENT_TIMESTAMP WHERE id = ?').run(doc.id);
+          await supabase
+            .from('documents')
+            .update({ last_checked_at: new Date().toISOString() })
+            .eq('id', doc.id);
         }
       } catch (error) {
         console.error(`[SYNCHRONIZER] ❌ Failed to ping source for ${doc.title}.`);
-        db.prepare('UPDATE documents SET last_checked_at = CURRENT_TIMESTAMP WHERE id = ?').run(doc.id);
+        await supabase
+          .from('documents')
+          .update({ last_checked_at: new Date().toISOString() })
+          .eq('id', doc.id);
       }
     }
   } catch (err) {
