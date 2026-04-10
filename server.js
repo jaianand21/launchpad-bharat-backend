@@ -351,10 +351,19 @@ app.post('/api/leads', async (req, res) => {
   if (!name || !email || !mobile) return res.status(400).json({ error: 'Missing lead info' });
 
   try {
-    db.prepare(`INSERT OR IGNORE INTO leads (name, email, mobile, joined_at) VALUES (?, ?, ?, ?)`).run(name.trim(), email.trim(), mobile.trim(), joinedAt || new Date().toISOString());
+    db.prepare(`
+      INSERT INTO leads (name, email, mobile, joined_at) 
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(email) DO UPDATE SET 
+        name = excluded.name,
+        mobile = excluded.mobile,
+        joined_at = excluded.joined_at
+    `).run(name.trim(), email.trim(), mobile.trim(), joinedAt || new Date().toISOString());
+    
     setTimeout(syncLeadsToExcel, 300);
     res.json({ success: true });
   } catch (err) {
+    console.error('[LEAD] Error:', err.message);
     res.status(500).json({ error: 'Lead save failed' });
   }
 });
