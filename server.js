@@ -546,37 +546,39 @@ app.post('/api/generate-blueprint', async (req, res) => {
   }
 
   const prompt = `
-    You are an eccentric, brilliant Venture Capitalist and disruptive Startup Architect in India.
-    ACTIVATE TREND ANALYSIS: Scan your vast knowledge base for highly successful, cutting-edge FOREIGN startup models (from the US, Europe, or China) that are currently NOT implemented in India yet.
-    
-    Take that foreign concept and give it a localized "Indian Touch" (Desi ingenuity, WhatsApp-first nature, high trust requirements, etc.). 
-    Do NOT give me boring, generic ideas. I want OUT OF THE BOX, unconventional, and disruptive startup ideas.
-    
-    Develop a highly creative, unorthodox, yet logically explosive startup idea for a founder with these parameters:
-    - User Skills: ${skills}
-    - Target Niche: ${niches}
-    - Starting Capital: ₹${budget}
+### ROLE: LEAD SYSTEM ARCHITECT & DESI VENTURE CAPITALIST
+You are a high-stakes Startup Architect. Your task is to generate a disruptive, logically explosive startup model for the Indian market. 
 
-    Return the response strictly as a JSON object with these EXACT keys:
-    {
-      "name": "Creative & Catchy Startup Name",
-      "overview": "What exactly the startup does in 2 sentences (Must sound highly disruptive. Mention the foreign inspiration behind it).",
-      "problem": "The hidden or ignored real-world pain point being solved in India.",
-      "solution": "The out-of-the-box, unconventional way this startup solves that problem with an Indian Touch.",
-      "future_scope": "Crazy but achievable vision for the next 5 years and how it scales massively.",
-      "revenue_model": "3 highly specific and clever ways this business will make money.",
-      "tech_stack": "Recommended technology for an MVP based on the budget.",
-      "roadmap": [
-        "Month 1 text",
-        "Month 2 text",
-        "Month 3 text",
-        "Month 4 text",
-        "Month 5 text",
-        "Month 6 text"
-      ]
-    }
+### THE INPUTS:
+- Founder Skills: ${skills}
+- Target Niche: ${niches}
+- Initial Capital: ₹${budget}
 
-    Ensure the idea leverages the user's specific skills in a completely unexpected way. Push the boundaries!
+### LOGIC CONSTRAINTS (MUST FOLLOW):
+1. ZERO-BURN MARKETING: Budget is ₹${budget}. You are FORBIDDEN from allocating funds to paid ads (FB/Google/Insta). All growth must be "Organic-Viral" or "Product-Led." 
+2. FOREIGN SYNTHESIS: Identify a successful model from the US (SaaS), China (Social/Micro-commerce), or Europe (Fintech/Sustainability) that hasn't hit India yet. Localize it with "High-Trust" Indian mechanics (WhatsApp-first, referral-heavy, cash-flow conscious).
+3. THE NAMING PROTOCOL: The name must be logical, relevant, and catchy. It should be a fusion of a modern tech concept and a culturally resonant Indian term (e.g., "KisanSaaS", "DukanFlow").
+4. SKILL SYNERGY: The idea must leverage the founder's skills (${skills}) in a non-obvious way. If they know AI, don't just build a chatbot—build an automated industry-specific engine.
+5. VARIABILITY: Every time this prompt is run, pivot the "Value Proposition" to a different segment of the ${niches} to ensure 100% unique results.
+
+### OUTPUT FORMAT (STRICT JSON):
+{
+  "name": "Logical & Cultural Fusion Name",
+  "overview": "2 sentences. Mention the foreign inspiration and the disruptive Indian twist.",
+  "problem": "A deep, unaddressed pain point in the Indian context.",
+  "solution": "An unorthodox use of the founder's skills to solve the problem without burning cash.",
+  "future_scope": "The 5-year 'Moonshot' vision.",
+  "revenue_model": ["Clever Method 1", "Clever Method 2", "High-margin Method 3"],
+  "tech_stack": "MVP stack optimized for speed and the specific budget.",
+  "roadmap": [
+    "Month 1: [Specific Action]",
+    "Month 2: [Specific Action]",
+    "Month 3: [Specific Action]",
+    "Month 4: [Specific Action]",
+    "Month 5: [Specific Action]",
+    "Month 6: [Specific Action]"
+  ]
+}
   `;
 
   try {
