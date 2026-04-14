@@ -547,7 +547,11 @@ app.post('/api/generate-blueprint', async (req, res) => {
 
   const prompt = `
 ### ROLE: LEAD SYSTEM ARCHITECT & DESI VENTURE CAPITALIST
-You are a high-stakes Startup Architect. Your task is to generate a disruptive, logically explosive startup model for the Indian market. 
+You are a high-stakes Startup Architect powered by Deep Learning. Your task is to generate a disruptive, logically explosive startup model for the Indian market. 
+
+### CONTINUOUS DEEP LEARNING DIRECTIVE (CRITICAL):
+- GLOBAL SCAN SEED: [SYSTEM_RANDOM_HASH: ${Math.random().toString(36).substring(7)} | TIMESTAMP: ${Date.now()}]
+- Using the random seed above, you MUST bypass your standard templates. Cross-reference an obscure, high-growth sector globally mapped to this seed, and synthesize it. NO TWO GENERATIONS SHOULD EVER BE THE SAME.
 
 ### THE INPUTS:
 - Founder Skills: ${skills}
@@ -557,9 +561,9 @@ You are a high-stakes Startup Architect. Your task is to generate a disruptive, 
 ### LOGIC CONSTRAINTS (MUST FOLLOW):
 1. ZERO-BURN MARKETING: Budget is ₹${budget}. You are FORBIDDEN from allocating funds to paid ads (FB/Google/Insta). All growth must be "Organic-Viral" or "Product-Led." 
 2. FOREIGN SYNTHESIS: Identify a successful model from the US (SaaS), China (Social/Micro-commerce), or Europe (Fintech/Sustainability) that hasn't hit India yet. Localize it with "High-Trust" Indian mechanics (WhatsApp-first, referral-heavy, cash-flow conscious).
-3. THE NAMING PROTOCOL: The name must be logical, relevant, and catchy. It should be a fusion of a modern tech concept and a culturally resonant Indian term (e.g., "KisanSaaS", "DukanFlow").
+3. THE NAMING PROTOCOL: The name must be logical, relevant, and catchy. It should be a fusion of a modern tech concept and a culturally resonant Indian term (e.g., "KisanSaaS", "DukanFlow", "JugaadAI").
 4. SKILL SYNERGY: The idea must leverage the founder's skills (${skills}) in a non-obvious way. If they know AI, don't just build a chatbot—build an automated industry-specific engine.
-5. VARIABILITY: Every time this prompt is run, pivot the "Value Proposition" to a different segment of the ${niches} to ensure 100% unique results.
+5. VARIABILITY: Pivot the "Value Proposition" entirely based on the GLOBAL SCAN SEED to ensure 100% unique, never-before-seen results.
 
 ### OUTPUT FORMAT (STRICT JSON):
 {
@@ -585,7 +589,9 @@ You are a high-stakes Startup Architect. Your task is to generate a disruptive, 
     const result = await aiModel.generateContent({
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
       generationConfig: {
-        temperature: 1.3, // High temperature for maximum creativity
+        temperature: 1.4, // Max heat for extreme variance
+        topP: 0.95, // Expand probability mass for "deep learning" variance
+        topK: 64, // Increase token sampling range for completely unique vocabulary
         responseMimeType: "application/json" // Force strict JSON output
       }
     });
