@@ -546,52 +546,42 @@ app.post('/api/generate-blueprint', async (req, res) => {
   }
 
   const prompt = `
-### ROLE: LEAD SYSTEM ARCHITECT & DESI VENTURE CAPITALIST
-You are a high-stakes Startup Architect powered by Deep Learning. Your task is to generate a disruptive, logically explosive startup model for the Indian market. 
+    Role: Act as an Expert Startup Architect and Product Strategist in India.
+    Objective: Generate a comprehensive, logical "Honest Blueprint" for a startup based on the following parameters:
+    - Founder Niche / Skills: ${skills}
+    - Industry: ${niches}
+    - Total Launch Budget: ₹${budget} (Hard Limit).
+    - Goal: Move from "Raw Idea" to "Minimum Viable Product (MVP)" with high conversion potential.
 
-### CONTINUOUS DEEP LEARNING DIRECTIVE (CRITICAL):
-- GLOBAL SCAN SEED: [SYSTEM_RANDOM_HASH: ${Math.random().toString(36).substring(7)} | TIMESTAMP: ${Date.now()}]
-- Using the random seed above, you MUST bypass your standard templates. Cross-reference an obscure, high-growth sector globally mapped to this seed, and synthesize it. NO TWO GENERATIONS SHOULD EVER BE THE SAME.
+    ACTIVATE TREND ANALYSIS: Scan your vast knowledge base for highly successful, cutting-edge FOREIGN startup models (from the US, Europe, or China) that are currently NOT implemented in India yet. Give that foreign concept a localized "Indian Touch" (Desi ingenuity, WhatsApp-first nature, high trust requirements, etc.). 
+    
+    Instructions for Logic:
+    * Use advanced logic to ensure all financial estimates are realistic and strictly kept under the ₹${budget} hard limit.
+    * Prioritize the user's core skills as a competitive advantage.
+    * If a feature is too expensive for the budget, you MUST suggest a manual "Wizard of Oz" alternative.
+    * Do NOT give me boring, generic ideas. I want OUT OF THE BOX, unconventional, and disruptive startup ideas.
 
-### THE INPUTS:
-- Founder Skills: ${skills}
-- Target Niche: ${niches}
-- Initial Capital: ₹${budget}
-
-### LOGIC CONSTRAINTS (MUST FOLLOW):
-1. ZERO-BURN MARKETING: Budget is ₹${budget}. You are FORBIDDEN from allocating funds to paid ads (FB/Google/Insta). All growth must be "Organic-Viral" or "Product-Led." 
-2. FOREIGN SYNTHESIS: Identify a successful model from the US (SaaS), China (Social/Micro-commerce), or Europe (Fintech/Sustainability) that hasn't hit India yet. Localize it with "High-Trust" Indian mechanics (WhatsApp-first, referral-heavy, cash-flow conscious).
-3. THE NAMING PROTOCOL: The name must be logical, relevant, and catchy. It should be a fusion of a modern tech concept and a culturally resonant Indian term (e.g., "KisanSaaS", "DukanFlow", "JugaadAI").
-4. SKILL SYNERGY: The idea must leverage the founder's skills (${skills}) in a non-obvious way. If they know AI, don't just build a chatbot—build an automated industry-specific engine.
-5. VARIABILITY: Pivot the "Value Proposition" entirely based on the GLOBAL SCAN SEED to ensure 100% unique, never-before-seen results.
-
-### OUTPUT FORMAT (STRICT JSON):
-{
-  "name": "Logical & Cultural Fusion Name",
-  "overview": "2 sentences. Mention the foreign inspiration and the disruptive Indian twist.",
-  "problem": "A deep, unaddressed pain point in the Indian context.",
-  "solution": "An unorthodox use of the founder's skills to solve the problem without burning cash.",
-  "future_scope": "The 5-year 'Moonshot' vision.",
-  "revenue_model": ["Clever Method 1", "Clever Method 2", "High-margin Method 3"],
-  "tech_stack": "MVP stack optimized for speed and the specific budget.",
-  "roadmap": [
-    "Month 1: [Specific Action]",
-    "Month 2: [Specific Action]",
-    "Month 3: [Specific Action]",
-    "Month 4: [Specific Action]",
-    "Month 5: [Specific Action]",
-    "Month 6: [Specific Action]"
-  ]
-}
+    Return the response strictly as a JSON object with these EXACT keys:
+    {
+      "name": "Creative & Catchy Startup Name",
+      "overview": "What exactly the startup does in 2 sentences. Mention the foreign inspiration behind it.",
+      "product_logic": "Map out the primary user journey, highlighting how the user's specific skills will solve a specific pain point.",
+      "lean_tech_stack": "Recommend a specific stack (No-code/Low-code preferred) that stays under the budget limit while allowing for scalability. Suggest Wizard of Oz methods if needed.",
+      "financial_allocation": "Provide a line-item breakdown of how to spend the exact ₹${budget} (e.g., Infrastructure, Marketing, Essential Tools). You must not exceed the budget.",
+      "critical_risks": "Identify the three biggest 'honest' reasons this could fail in the current Indian market and exactly how to mitigate them.",
+      "roadmap": [
+        "30 Days: A tactical timeline for design and initial setup",
+        "60 Days: Development and testing",
+        "90 Days: First-user acquisition and launch"
+      ]
+    }
   `;
 
   try {
     const result = await aiModel.generateContent({
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
       generationConfig: {
-        temperature: 1.4, // Max heat for extreme variance
-        topP: 0.95, // Expand probability mass for "deep learning" variance
-        topK: 64, // Increase token sampling range for completely unique vocabulary
+        temperature: 1.3, // High temperature for maximum creativity
         responseMimeType: "application/json" // Force strict JSON output
       }
     });
