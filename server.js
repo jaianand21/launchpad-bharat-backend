@@ -581,17 +581,25 @@ app.post('/api/generate-blueprint', async (req, res) => {
     const result = await aiModel.generateContent({
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
       generationConfig: {
-        temperature: 1.3, // High temperature for maximum creativity
-        responseMimeType: "application/json" // Force strict JSON output
+        temperature: 0.85,           // Lowered from 1.3 — prevents malformed JSON
+        maxOutputTokens: 2048,       // Prevents timeout on slow servers
+        responseMimeType: "application/json"
       }
     });
 
     const responseText = result.response.text();
-    const blueprintData = JSON.parse(responseText);
+
+    let blueprintData;
+    try {
+      blueprintData = JSON.parse(responseText);
+    } catch (parseErr) {
+      console.error('[AI] JSON Parse Error. Raw response:', responseText.slice(0, 500));
+      return res.status(500).json({ error: 'AI returned invalid data. Please try again.' });
+    }
 
     res.json(blueprintData);
   } catch (err) {
-    console.error('[AI] Blueprint Generation Error:', err.message);
+    console.error('[AI] Blueprint Generation Error:', err.message, err.stack);
     res.status(500).json({ error: 'AI failed to generate blueprint. Please try again.' });
   }
 });
