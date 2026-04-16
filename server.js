@@ -543,39 +543,157 @@ app.post('/api/generate-blueprint', async (req, res) => {
     return res.status(400).json({ error: 'Skills, Niches, and Budget are required to build a blueprint.' });
   }
 
-  const prompt = `
-You are an Expert Startup Architect and Product Strategist in India.
+  const systemPrompt = `You are "Launchpad Bharat AI" — India's most brutally honest Startup Architect, built specifically for first-time founders in Tier-2 and Tier-3 Indian cities.
 
-Generate a comprehensive "Honest Blueprint" for a startup with these parameters:
-- Founder Skills: ${skills}
-- Industry: ${niches}
-- Total Budget: INR ${budget} (HARD LIMIT — do not exceed this)
+Your personality: You think like a seasoned Indian VC who has seen 1000 pitches fail. You are direct, specific, and ruthlessly practical. You never give generic advice. Every idea you generate must be executable by a solo founder in India with limited resources.
 
-TASK: Find a successful FOREIGN startup model (US/EU/China) not yet in India, give it an Indian adaptation (WhatsApp-first, regional language support, trust-first model, etc.).
+CORE RULES YOU NEVER BREAK:
+1. ZERO paid tools unless absolutely unavoidable — always suggest free alternatives first
+2. NO domain cost — use Vercel free subdomain or Carrd free tier
+3. NO ad spend — use Instagram Reels, YouTube Shorts, WhatsApp Status, local college/chai-shop outreach
+4. NO paid hosting — Vercel, Railway free tier, Render free tier, Supabase free tier
+5. NO paid email — use Gmail + Brevo free tier (300 emails/day)
+6. If a feature is too expensive — suggest "Wizard of Oz" manual workaround first
+7. EVERY startup idea must be inspired by a REAL foreign model (US/EU/China) not yet in India
+8. EVERY idea must have a WhatsApp-first or offline-first distribution strategy
+9. EVERY startup name must be catchy, short, Hinglish-friendly, and domain-available on Vercel
+10. ALWAYS treat the founder's skill as the #1 competitive moat — build the entire idea around it
+11. NEVER repeat the same startup idea twice — use the founder's unique skill+budget+niche combo to generate a completely fresh concept every time
+12. GST and legal compliance must be mentioned honestly
+13. Be a mentor, not a cheerleader — flag every real risk
 
-IMPORTANT RULES:
-- If any feature costs too much for the budget, suggest a free manual "Wizard of Oz" workaround instead.
-- Prioritize the founder's skill (${skills}) as the primary competitive advantage.
-- Be specific, honest, and realistic — not generic.
+BUDGET LOGIC:
+- Under 5000 INR: Pure service/consulting model, zero product build
+- 5000-15000 INR: No-code MVP only (Glide, Softr, Carrd, WhatsApp Business)
+- 15000-50000 INR: Lightweight web app (Next.js on Vercel + Supabase)
+- 50000-200000 INR: Full MVP with basic automation
+- Above 200000 INR: Product + small team + first paid marketing
 
-Respond ONLY with a valid JSON object using these exact keys. ALL VALUES MUST BE STRINGS EXCEPT 'roadmap' WHICH IS AN ARRAY OF STRINGS:
+OUTPUT FORMAT: Respond ONLY with a valid JSON object. No markdown. No explanation outside JSON. No extra keys. Every value must be exactly the type shown in the schema.`;
+
+  const userPrompt = `Generate a complete "Launchpad Bharat Blueprint" for this founder:
+
+FOUNDER PROFILE:
+- Skills: ${skills}
+- Target Industry/Niche: ${niches}
+- Total Starting Budget: INR ${budget} (HARD LIMIT — do not exceed this in any cost line)
+
+YOUR TASK:
+Find ONE highly specific foreign startup (US/EU/China) that is successful but has NOT launched in India. Adapt it completely for the Indian market with a "Desi Touch."
+
+Also add a "founder_tips" section with 5 actionable suggestions that a first-time startup founder in India absolutely needs to know.
+
+Respond ONLY with this exact JSON structure (all values are strings unless noted otherwise):
+
 {
-  "name": "string (a creative, catchy startup name)",
-  "overview": "string (2 sentences: what it does and which foreign startup inspired it)",
-  "product_logic": "string (the primary user journey and how the founder's skill solves the core pain point)",
-  "lean_tech_stack": "string (specific tools/platforms recommended prefer no-code, with Wizard of Oz alternatives for anything too costly)",
-  "financial_allocation": "string (line-item spend breakdown within INR ${budget} budget, format as a single paragraph or bulleted text)",
-  "critical_risks": "string (3 honest risks that could kill this startup and exactly how to mitigate each one, format as a single paragraph or bulleted text)",
-  "roadmap": ["string (30 Days...)", "string (60 Days...)", "string (90 Days...)"]
-}
-`;
+  "startup_name": "string — Catchy Hinglish-friendly name, max 2 words",
+  "tagline": "string — One punchy line, max 10 words",
+  "foreign_inspiration": {
+    "company": "string — Exact foreign company name",
+    "country": "string — Country",
+    "why_not_in_india_yet": "string — Honest 1-sentence reason"
+  },
+  "problem_statement": "string — 3-4 sentences. The EXACT pain point this solves for an Indian Tier-2/3 user. Use real scenarios, not abstract language.",
+  "solution": "string — 3-4 sentences. How the founder's skill directly solves this. Be specific about the user journey from discovery to payment to result.",
+  "indian_adaptation": {
+    "distribution": "string — WhatsApp-first or offline-first strategy in detail",
+    "trust_building": "string — How to build trust in a low-trust market (COD, referrals, demos, etc.)",
+    "language": "string — Regional language / Hinglish support plan",
+    "payment": "string — UPI, COD, or instalment strategy"
+  },
+  "free_tech_stack": {
+    "frontend": "string — Tool name + why it is free and suitable",
+    "backend": "string — Tool name + free tier details",
+    "database": "string — Tool name + free tier details",
+    "communication": "string — WhatsApp Business API free tier or alternative",
+    "hosting": "string — Vercel / Railway / Render free tier",
+    "payments": "string — Razorpay free + UPI QR code",
+    "domain": "string — yourname.vercel.app or Carrd free subdomain",
+    "email": "string — Brevo free 300/day or Gmail"
+  },
+  "financial_allocation": {
+    "total_budget": "string — INR ${budget}",
+    "line_items": [
+      { "item": "string — Item name", "cost": "string — INR amount or FREE", "free_alternative": "string — Alternative if paid" }
+    ],
+    "total_spent": "string — INR X (must be under budget)",
+    "reserve": "string — INR Y (keep minimum 20% as emergency reserve)"
+  },
+  "revenue_model": {
+    "month_1_to_3": "string — Exact first revenue source with pricing in INR",
+    "month_4_to_6": "string — Second revenue stream",
+    "year_2": "string — Scale strategy",
+    "break_even_target": "string — Estimated month to break even"
+  },
+  "six_month_roadmap": [
+    {
+      "month": "string — Month 1",
+      "theme": "string — One-word theme",
+      "weekly_tasks": ["string — Week 1: ...", "string — Week 2: ...", "string — Week 3: ...", "string — Week 4: ..."],
+      "milestone": "string — What success looks like at end of month"
+    },
+    {
+      "month": "string — Month 2",
+      "theme": "string — One-word theme",
+      "weekly_tasks": ["string — Week 1: ...", "string — Week 2: ...", "string — Week 3: ...", "string — Week 4: ..."],
+      "milestone": "string — What success looks like at end of month"
+    },
+    {
+      "month": "string — Month 3",
+      "theme": "string — One-word theme",
+      "weekly_tasks": ["string — Week 1: ...", "string — Week 2: ...", "string — Week 3: ...", "string — Week 4: ..."],
+      "milestone": "string — What success looks like at end of month"
+    },
+    {
+      "month": "string — Month 4",
+      "theme": "string — One-word theme",
+      "weekly_tasks": ["string — Week 1: ...", "string — Week 2: ...", "string — Week 3: ...", "string — Week 4: ..."],
+      "milestone": "string — What success looks like at end of month"
+    },
+    {
+      "month": "string — Month 5",
+      "theme": "string — One-word theme",
+      "weekly_tasks": ["string — Week 1: ...", "string — Week 2: ...", "string — Week 3: ...", "string — Week 4: ..."],
+      "milestone": "string — What success looks like at end of month"
+    },
+    {
+      "month": "string — Month 6",
+      "theme": "string — One-word theme",
+      "weekly_tasks": ["string — Week 1: ...", "string — Week 2: ...", "string — Week 3: ...", "string — Week 4: ..."],
+      "milestone": "string — What success looks like at end of month"
+    }
+  ],
+  "critical_risks": [
+    { "risk": "string", "probability": "string — High/Medium/Low", "impact": "string — High/Medium/Low", "mitigation": "string — step-by-step mitigation" },
+    { "risk": "string", "probability": "string", "impact": "string", "mitigation": "string" },
+    { "risk": "string", "probability": "string", "impact": "string", "mitigation": "string" }
+  ],
+  "legal_and_compliance": {
+    "business_registration": "string — Sole proprietorship first — cost and process",
+    "gst_registration": "string — When to register, threshold, cost",
+    "required_documents": ["string — Document 1", "string — Document 2", "string — Document 3"],
+    "important_warnings": "string — Any sector-specific legal risks"
+  },
+  "website_must_haves": ["string — Feature 1", "string — Feature 2", "string — Feature 3", "string — Feature 4", "string — Feature 5"],
+  "founder_superpower": "string — 1 paragraph describing how this founder's specific skill gives them an unfair advantage over any well-funded competitor",
+  "founder_tips": ["string — Tip 1", "string — Tip 2", "string — Tip 3", "string — Tip 4", "string — Tip 5"],
+  "honest_verdict": {
+    "viability_score": "string — X/10",
+    "best_case": "string — If everything goes right in 12 months...",
+    "worst_case": "string — If the top 2 risks hit simultaneously...",
+    "one_thing_that_will_make_or_break_this": "string — The single most important execution factor"
+  }
+}`;
 
   try {
     const result = await groq.chat.completions.create({
-      messages: [{ role: 'user', content: prompt }],
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt }
+      ],
       model: 'llama-3.3-70b-versatile',
-      temperature: 0.9,
-      max_completion_tokens: 2048,
+      temperature: 0.85,
+      max_completion_tokens: 4096,
       response_format: { type: 'json_object' }
     });
 
@@ -604,7 +722,6 @@ Respond ONLY with a valid JSON object using these exact keys. ALL VALUES MUST BE
     res.json(blueprintData);
   } catch (err) {
     console.error('[AI] Blueprint Generation Error:', err.message);
-    // Return real error message for easier debugging
     res.status(500).json({ error: `AI Error: ${err.message}` });
   }
 });

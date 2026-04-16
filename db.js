@@ -6,18 +6,23 @@ dotenv.config();
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_KEY;
 
+let supabase = null;
+
 if (!supabaseUrl || !supabaseKey) {
-  console.error('❌ CRITICAL: Missing SUPABASE_URL or SUPABASE_KEY in environment variables.');
+  console.warn('⚠️ Missing SUPABASE_URL or SUPABASE_KEY — database features disabled. AI endpoints still work.');
+} else {
+  supabase = createClient(supabaseUrl, supabaseKey);
 }
 
-// Initialize the Supabase client
-export const supabase = createClient(supabaseUrl, supabaseKey);
-
-// Legacy export compatibility (though we should migrate all to 'supabase' export)
+export { supabase };
 export default supabase;
 
 // Supabase creates its own tables via the SQL Editor, so initDb is mostly for seeding or logging
 export const initDb = async () => {
+    if (!supabase) {
+      console.log('⚠️ Skipping DB init — no Supabase credentials.');
+      return;
+    }
     console.log('✅ Supabase Client ready. Ensure your tables are created in the Supabase SQL Editor.');
     
     // Check if documents table needs seeding
