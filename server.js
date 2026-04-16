@@ -12,8 +12,7 @@ import { fileURLToPath } from 'url';
 import { supabase, initDb } from './db.js';
 import { initScheduler, manuallySyncAllDocuments } from './scheduler.js';
 import { sendOtpSms } from './smsService.js';
-import { GoogleGenerativeAI } from '@google/generative-ai';
-
+import Groq from 'groq-sdk';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 dotenv.config();
@@ -30,9 +29,8 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
-// Initialize Gemini AI
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const aiModel = genAI.getGenerativeModel({ model: "gemini-2.0-flash" }); // current free-tier model
+// Initialize Groq AI Engine
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
 // ── In-memory password reset codes (code → { email, expiry }) ────────────────
 const resetCodes = new Map();
@@ -573,16 +571,15 @@ Respond ONLY with a valid JSON object using these exact keys (no extra text befo
 `;
 
   try {
-    const result = await aiModel.generateContent({
-      contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      generationConfig: {
-        temperature: 0.9,
-        maxOutputTokens: 2048
-        // NOTE: responseMimeType removed — causes silent crash with complex prompts
-      }
+    const result = await groq.chat.completions.create({
+      messages: [{ role: 'user', content: prompt }],
+      model: 'llama-3.3-70b-versatile',
+      temperature: 0.9,
+      max_completion_tokens: 2048,
+      response_format: { type: 'json_object' }
     });
 
-    const responseText = result.response.text();
+    const responseText = result.choices[0].message.content;
 
     // Try direct parse first
     let blueprintData;
