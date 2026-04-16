@@ -546,61 +546,69 @@ app.post('/api/generate-blueprint', async (req, res) => {
   }
 
   const prompt = `
-    Role: Act as an Expert Startup Architect and Product Strategist in India.
-    Objective: Generate a comprehensive, logical "Honest Blueprint" for a startup based on the following parameters:
-    - Founder Niche / Skills: ${skills}
-    - Industry: ${niches}
-    - Total Launch Budget: ₹${budget} (Hard Limit).
-    - Goal: Move from "Raw Idea" to "Minimum Viable Product (MVP)" with high conversion potential.
+You are an Expert Startup Architect and Product Strategist in India.
 
-    ACTIVATE TREND ANALYSIS: Scan your vast knowledge base for highly successful, cutting-edge FOREIGN startup models (from the US, Europe, or China) that are currently NOT implemented in India yet. Give that foreign concept a localized "Indian Touch" (Desi ingenuity, WhatsApp-first nature, high trust requirements, etc.). 
-    
-    Instructions for Logic:
-    * Use advanced logic to ensure all financial estimates are realistic and strictly kept under the ₹${budget} hard limit.
-    * Prioritize the user's core skills as a competitive advantage.
-    * If a feature is too expensive for the budget, you MUST suggest a manual "Wizard of Oz" alternative.
-    * Do NOT give me boring, generic ideas. I want OUT OF THE BOX, unconventional, and disruptive startup ideas.
+Generate a comprehensive "Honest Blueprint" for a startup with these parameters:
+- Founder Skills: ${skills}
+- Industry: ${niches}
+- Total Budget: INR ${budget} (HARD LIMIT — do not exceed this)
 
-    Return the response strictly as a JSON object with these EXACT keys:
-    {
-      "name": "Creative & Catchy Startup Name",
-      "overview": "What exactly the startup does in 2 sentences. Mention the foreign inspiration behind it.",
-      "product_logic": "Map out the primary user journey, highlighting how the user's specific skills will solve a specific pain point.",
-      "lean_tech_stack": "Recommend a specific stack (No-code/Low-code preferred) that stays under the budget limit while allowing for scalability. Suggest Wizard of Oz methods if needed.",
-      "financial_allocation": "Provide a line-item breakdown of how to spend the exact ₹${budget} (e.g., Infrastructure, Marketing, Essential Tools). You must not exceed the budget.",
-      "critical_risks": "Identify the three biggest 'honest' reasons this could fail in the current Indian market and exactly how to mitigate them.",
-      "roadmap": [
-        "30 Days: A tactical timeline for design and initial setup",
-        "60 Days: Development and testing",
-        "90 Days: First-user acquisition and launch"
-      ]
-    }
-  `;
+TASK: Find a successful FOREIGN startup model (US/EU/China) not yet in India, give it an Indian adaptation (WhatsApp-first, regional language support, trust-first model, etc.).
+
+IMPORTANT RULES:
+- If any feature costs too much for the budget, suggest a free manual "Wizard of Oz" workaround instead.
+- Prioritize the founder's skill (${skills}) as the primary competitive advantage.
+- Be specific, honest, and realistic — not generic.
+
+Respond ONLY with a valid JSON object using these exact keys (no extra text before or after):
+{
+  "name": "a creative, catchy startup name",
+  "overview": "2 sentences: what it does and which foreign startup inspired it",
+  "product_logic": "the primary user journey and how the founder's skill solves the core pain point",
+  "lean_tech_stack": "specific tools/platforms recommended (prefer no-code), with Wizard of Oz alternatives for anything too costly",
+  "financial_allocation": "line-item spend breakdown within INR ${budget} budget (e.g. Domain: INR 800, Hosting: INR 2000, Marketing: INR 1500)",
+  "critical_risks": "3 honest risks that could kill this startup and exactly how to mitigate each one",
+  "roadmap": ["30 Days: ...", "60 Days: ...", "90 Days: ..."]
+}
+`;
 
   try {
     const result = await aiModel.generateContent({
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
       generationConfig: {
-        temperature: 0.85,           // Lowered from 1.3 — prevents malformed JSON
-        maxOutputTokens: 2048,       // Prevents timeout on slow servers
-        responseMimeType: "application/json"
+        temperature: 0.9,
+        maxOutputTokens: 2048
+        // NOTE: responseMimeType removed — causes silent crash with complex prompts
       }
     });
 
     const responseText = result.response.text();
 
+    // Try direct parse first
     let blueprintData;
     try {
       blueprintData = JSON.parse(responseText);
-    } catch (parseErr) {
-      console.error('[AI] JSON Parse Error. Raw response:', responseText.slice(0, 500));
-      return res.status(500).json({ error: 'AI returned invalid data. Please try again.' });
+    } catch {
+      // Fallback: extract JSON block from markdown code fences or mixed text
+      const match = responseText.match(/\{[\s\S]*\}/);
+      if (match) {
+        try {
+          blueprintData = JSON.parse(match[0]);
+        } catch (e2) {
+          console.error('[AI] JSON Extract Failed. Raw:', responseText.slice(0, 800));
+          return res.status(500).json({ error: `AI returned unparseable data: ${e2.message}` });
+        }
+      } else {
+        console.error('[AI] No JSON found. Raw:', responseText.slice(0, 800));
+        return res.status(500).json({ error: 'AI response had no JSON block. Please try again.' });
+      }
     }
 
     res.json(blueprintData);
   } catch (err) {
-    console.error('[AI] Blueprint Generation Error:', err.message, err.stack);
-    res.status(500).json({ error: 'AI failed to generate blueprint. Please try again.' });
+    console.error('[AI] Blueprint Generation Error:', err.message);
+    // Return real error message for easier debugging
+    res.status(500).json({ error: `AI Error: ${err.message}` });
   }
 });
 
