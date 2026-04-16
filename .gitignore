@@ -6,6 +6,10 @@ node_modules/
 .env.local
 .env.production
 
+# Test scripts — may contain hardcoded keys
+test-gemini.js
+test-*.js
+
 # Database files — contains real user data, do NOT commit
 database.sqlite
 *.sqlite
