@@ -558,15 +558,15 @@ IMPORTANT RULES:
 - Prioritize the founder's skill (${skills}) as the primary competitive advantage.
 - Be specific, honest, and realistic — not generic.
 
-Respond ONLY with a valid JSON object using these exact keys (no extra text before or after):
+Respond ONLY with a valid JSON object using these exact keys. ALL VALUES MUST BE STRINGS EXCEPT 'roadmap' WHICH IS AN ARRAY OF STRINGS:
 {
-  "name": "a creative, catchy startup name",
-  "overview": "2 sentences: what it does and which foreign startup inspired it",
-  "product_logic": "the primary user journey and how the founder's skill solves the core pain point",
-  "lean_tech_stack": "specific tools/platforms recommended (prefer no-code), with Wizard of Oz alternatives for anything too costly",
-  "financial_allocation": "line-item spend breakdown within INR ${budget} budget (e.g. Domain: INR 800, Hosting: INR 2000, Marketing: INR 1500)",
-  "critical_risks": "3 honest risks that could kill this startup and exactly how to mitigate each one",
-  "roadmap": ["30 Days: ...", "60 Days: ...", "90 Days: ..."]
+  "name": "string (a creative, catchy startup name)",
+  "overview": "string (2 sentences: what it does and which foreign startup inspired it)",
+  "product_logic": "string (the primary user journey and how the founder's skill solves the core pain point)",
+  "lean_tech_stack": "string (specific tools/platforms recommended prefer no-code, with Wizard of Oz alternatives for anything too costly)",
+  "financial_allocation": "string (line-item spend breakdown within INR ${budget} budget, format as a single paragraph or bulleted text)",
+  "critical_risks": "string (3 honest risks that could kill this startup and exactly how to mitigate each one, format as a single paragraph or bulleted text)",
+  "roadmap": ["string (30 Days...)", "string (60 Days...)", "string (90 Days...)"]
 }
 `;
 
