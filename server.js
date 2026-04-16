@@ -32,7 +32,7 @@ const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 // Initialize Gemini AI
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const aiModel = genAI.getGenerativeModel({ model: "gemini-1.5-flash" }); // stable, guaranteed available
+const aiModel = genAI.getGenerativeModel({ model: "gemini-2.0-flash" }); // current free-tier model
 
 // ── In-memory password reset codes (code → { email, expiry }) ────────────────
 const resetCodes = new Map();
