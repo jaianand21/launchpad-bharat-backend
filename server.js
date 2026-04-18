@@ -13,6 +13,7 @@ import { supabase, initDb } from './db.js';
 import { initScheduler, manuallySyncAllDocuments } from './scheduler.js';
 import { sendOtpSms } from './smsService.js';
 import Groq from 'groq-sdk';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 dotenv.config();
@@ -29,8 +30,82 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
-// Initialize Groq AI Engine
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+// ── Multi-Key AI Rotation Pool ───────────────────────────────────────────────
+const GROQ_KEY_POOL = [
+  { key: process.env.GROQ_API_KEY_1, model: 'llama-3.3-70b-versatile', label: 'Groq-1' },
+  { key: process.env.GROQ_API_KEY_2, model: 'llama-3.3-70b-versatile', label: 'Groq-2' },
+  { key: process.env.GROQ_API_KEY_3, model: 'llama3-70b-8192',         label: 'Groq-3' },
+  { key: process.env.GROQ_API_KEY_4, model: 'llama3-8b-8192',          label: 'Groq-4' },
+].filter(entry => entry.key);
+
+const GEMINI_KEY_POOL = [
+  { key: process.env.GEMINI_API_KEY_1, model: 'gemini-2.0-flash', label: 'Gemini-1' },
+  { key: process.env.GEMINI_API_KEY_2, model: 'gemini-2.0-flash', label: 'Gemini-2' },
+  { key: process.env.GEMINI_API_KEY_3, model: 'gemini-1.5-flash', label: 'Gemini-3' },
+  { key: process.env.GEMINI_API_KEY_4, model: 'gemini-1.5-flash', label: 'Gemini-4' },
+].filter(entry => entry.key);
+
+let groqStartIndex = 0;
+let geminiStartIndex = 0;
+
+const tryGroqKey = async (entry, systemPrompt, userPrompt) => {
+  const instance = new Groq({ apiKey: entry.key });
+  const result = await instance.chat.completions.create({
+    messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
+    model: entry.model,
+    temperature: 0.85,
+    max_completion_tokens: 4096,
+    response_format: { type: 'json_object' }
+  });
+  return result.choices[0].message.content;
+};
+
+const tryGeminiKey = async (entry, systemPrompt, userPrompt) => {
+  const genAI = new GoogleGenerativeAI(entry.key);
+  const model = genAI.getGenerativeModel({ model: entry.model });
+  const result = await model.generateContent(`${systemPrompt}\n\n${userPrompt}`);
+  return result.response.text();
+};
+
+const callAIWithFallback = async (systemPrompt, userPrompt) => {
+  for (let i = 0; i < GROQ_KEY_POOL.length; i++) {
+    const index = (groqStartIndex + i) % GROQ_KEY_POOL.length;
+    const entry = GROQ_KEY_POOL[index];
+    try {
+      console.log(`[AI] Trying ${entry.label}...`);
+      const text = await tryGroqKey(entry, systemPrompt, userPrompt);
+      groqStartIndex = index;
+      console.log(`[AI] ✅ ${entry.label} succeeded.`);
+      return text;
+    } catch (err) {
+      if (err?.status === 429 || err?.status === 401 || err?.status === 400 || err?.message?.toLowerCase().includes('rate')) {
+        console.warn(`[AI] ⚠️ ${entry.label} failed (${err.status || err.message}). Trying next...`);
+        groqStartIndex = (index + 1) % GROQ_KEY_POOL.length;
+        continue;
+      }
+      throw err;
+    }
+  }
+  for (let i = 0; i < GEMINI_KEY_POOL.length; i++) {
+    const index = (geminiStartIndex + i) % GEMINI_KEY_POOL.length;
+    const entry = GEMINI_KEY_POOL[index];
+    try {
+      console.log(`[AI] Trying ${entry.label}...`);
+      const text = await tryGeminiKey(entry, systemPrompt, userPrompt);
+      geminiStartIndex = index;
+      console.log(`[AI] ✅ ${entry.label} succeeded.`);
+      return text;
+    } catch (err) {
+      if (err?.status === 429 || err?.status === 401 || err?.message?.toLowerCase().includes('quota') || err?.message?.toLowerCase().includes('rate')) {
+        console.warn(`[AI] ⚠️ ${entry.label} failed (${err.status || err.message}). Trying next...`);
+        geminiStartIndex = (index + 1) % GEMINI_KEY_POOL.length;
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw new Error('Our AI is taking a short break. Please try again in 5 minutes.');
+};
 
 // ── In-memory password reset codes (code → { email, expiry }) ────────────────
 const resetCodes = new Map();
@@ -686,18 +761,7 @@ Respond ONLY with this exact JSON structure (all values are strings unless noted
 }`;
 
   try {
-    const result = await groq.chat.completions.create({
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt }
-      ],
-      model: 'llama-3.3-70b-versatile',
-      temperature: 0.85,
-      max_completion_tokens: 4096,
-      response_format: { type: 'json_object' }
-    });
-
-    const responseText = result.choices[0].message.content;
+    const responseText = await callAIWithFallback(systemPrompt, userPrompt);
 
     // Try direct parse first
     let blueprintData;
@@ -722,7 +786,7 @@ Respond ONLY with this exact JSON structure (all values are strings unless noted
     res.json(blueprintData);
   } catch (err) {
     console.error('[AI] Blueprint Generation Error:', err.message);
-    res.status(500).json({ error: `AI Error: ${err.message}` });
+    res.status(500).json({ error: err.message.includes('short break') ? err.message : 'Blueprint generation failed. Please try again in a moment.' });
   }
 });
 
