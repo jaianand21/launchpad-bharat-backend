@@ -1,29 +1,52 @@
-# Dependencies
+# ══════════════════════════════════════════════════════
+#  LAUNCHPAD BHARAT BACKEND — .gitignore
+#  🔒 NEVER commit secrets. This file protects them.
+# ══════════════════════════════════════════════════════
+
+# ── Node ─────────────────────────────────────────────
 node_modules/
 
-# Environment variables — NEVER commit these (contains JWT_SECRET, API keys)
+# ── ALL Environment / Secret files ───────────────────
 .env
+.env.*
+*.env
 .env.local
 .env.production
+.env.development
+.env.staging
 
-# Test scripts — may contain hardcoded keys
-test-gemini.js
+# ── Test scripts (may contain hardcoded keys) ────────
 test-*.js
+test-*.ts
+test-output.json
+*-output.json
 
-# Database files — contains real user data, do NOT commit
+# ── Database files (contain real user data) ──────────
 database.sqlite
 *.sqlite
 *.sqlite3
+*.db
 
-# Excel exports — contain real user/lead data
+# ── Excel exports (contain real user/lead data) ──────
 *.xlsx
 leads_database.xlsx
 users_database.xlsx
 
-# Logs
+# ── Logs ─────────────────────────────────────────────
 *.log
 npm-debug.log*
+logs/
 
-# OS files
+# ── OS & Editor files ────────────────────────────────
 .DS_Store
 Thumbs.db
+.vscode/settings.json
+
+# ── Key/Secret files (extra safety net) ─────────────
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
+credentials/
+replacements.txt
