@@ -32,17 +32,17 @@ const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 // ── Multi-Key AI Rotation Pool ───────────────────────────────────────────────
 const GROQ_KEY_POOL = [
-  { key: process.env.GROQ_API_KEY_1, model: 'llama-3.3-70b-versatile', label: 'Groq-1' },
-  { key: process.env.GROQ_API_KEY_2, model: 'llama-3.3-70b-versatile', label: 'Groq-2' },
-  { key: process.env.GROQ_API_KEY_3, model: 'llama3-70b-8192',         label: 'Groq-3' },
-  { key: process.env.GROQ_API_KEY_4, model: 'llama3-8b-8192',          label: 'Groq-4' },
+  { key: process.env.GROQ_API_KEY_pvt,         model: 'llama-3.3-70b-versatile', label: 'Groq-pvt' },
+  { key: process.env.GROQ_API_KEY_eng,          model: 'llama-3.3-70b-versatile', label: 'Groq-eng' },
+  { key: process.env.GROQ_API_KEY_abhay,        model: 'llama3-70b-8192',         label: 'Groq-abhay' },
+  { key: process.env.GROQ_API_KEY_abhay_class,  model: 'llama3-8b-8192',          label: 'Groq-abhay-class' },
 ].filter(entry => entry.key);
 
 const GEMINI_KEY_POOL = [
-  { key: process.env.GEMINI_API_KEY_1, model: 'gemini-2.0-flash', label: 'Gemini-1' },
-  { key: process.env.GEMINI_API_KEY_2, model: 'gemini-2.0-flash', label: 'Gemini-2' },
-  { key: process.env.GEMINI_API_KEY_3, model: 'gemini-1.5-flash', label: 'Gemini-3' },
-  { key: process.env.GEMINI_API_KEY_4, model: 'gemini-1.5-flash', label: 'Gemini-4' },
+  { key: process.env.GEMINI_API_pvt,        model: 'gemini-2.0-flash', label: 'Gemini-pvt' },
+  { key: process.env.GEMINI_API_eng,        model: 'gemini-2.0-flash', label: 'Gemini-eng' },
+  { key: process.env.GEMINI_API_abhay,      model: 'gemini-1.5-flash', label: 'Gemini-abhay' },
+  { key: process.env.GEMINI_API_abhay_class,model: 'gemini-1.5-flash', label: 'Gemini-abhay-class' },
 ].filter(entry => entry.key);
 
 let groqStartIndex = 0;
