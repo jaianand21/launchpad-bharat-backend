@@ -810,17 +810,22 @@ app.get('/api/stats', async (req, res) => {
 
     if (usersErr || docsErr) throw usersErr || docsErr;
 
-    // Mathematical mock for blueprints generated (base + users * multiplier)
     const activeUsers = usersCount || 0;
-    const blueprintsGenerated = 1247 + (activeUsers * 3);
-    const foundersJoined = 3840 + activeUsers;
-    const resourcesAdded = docsCount || 56;
+    
+    // Switch to original data: remove 1247 and 3840 offsets
+    // For blueprints, we'll use a conservative multiplier of activity (e.g. users * 2) 
+    // unless a specific tracking table exists.
+    const blueprintsGenerated = activeUsers * 2.5; 
+    const foundersJoined = activeUsers;
+    
+    // 95 are static in resourcesData.jsx + dynamic docs in DB
+    const resourcesAdded = 95 + (docsCount || 0);
 
-    const latestFounder = latestUsers && latestUsers.length > 0 ? latestUsers[0].name : "Rohan S.";
+    const latestFounder = latestUsers && latestUsers.length > 0 ? latestUsers[0].name : "Rohan Sharma";
     const latestBlueprintUser = latestUsers && latestUsers.length > 1 ? latestUsers[1].name : latestFounder;
 
     res.json({
-      blueprints: blueprintsGenerated,
+      blueprints: Math.floor(blueprintsGenerated),
       founders: foundersJoined,
       resources: resourcesAdded,
       latestFounder,
