@@ -801,6 +801,13 @@ app.get('/api/stats', async (req, res) => {
       .from('documents')
       .select('*', { count: 'exact', head: true });
 
+    // Fetch latest two users for the "Live" labels
+    const { data: latestUsers } = await supabase
+      .from('users')
+      .select('name')
+      .order('created_at', { ascending: false })
+      .limit(2);
+
     if (usersErr || docsErr) throw usersErr || docsErr;
 
     // Mathematical mock for blueprints generated (base + users * multiplier)
@@ -809,10 +816,15 @@ app.get('/api/stats', async (req, res) => {
     const foundersJoined = 3840 + activeUsers;
     const resourcesAdded = docsCount || 56;
 
+    const latestFounder = latestUsers && latestUsers.length > 0 ? latestUsers[0].name : "Rohan S.";
+    const latestBlueprintUser = latestUsers && latestUsers.length > 1 ? latestUsers[1].name : latestFounder;
+
     res.json({
       blueprints: blueprintsGenerated,
       founders: foundersJoined,
-      resources: resourcesAdded
+      resources: resourcesAdded,
+      latestFounder,
+      latestBlueprintUser
     });
   } catch (err) {
     console.error('[API] Stats error:', err.message);
