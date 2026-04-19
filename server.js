@@ -812,11 +812,9 @@ app.get('/api/stats', async (req, res) => {
 
     const activeUsers = usersCount || 0;
     
-    // Switch to original data: remove 1247 and 3840 offsets
-    // For blueprints, we'll use a conservative multiplier of activity (e.g. users * 2) 
-    // unless a specific tracking table exists.
-    const blueprintsGenerated = activeUsers * 2.5; 
-    const foundersJoined = activeUsers;
+    // Adjusted base offsets as per user request
+    const blueprintsGenerated = 247 + (activeUsers * 2.5); 
+    const foundersJoined = 91 + activeUsers;
     
     // 95 are static in resourcesData.jsx + dynamic docs in DB
     const resourcesAdded = 95 + (docsCount || 0);
