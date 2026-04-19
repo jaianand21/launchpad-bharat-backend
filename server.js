@@ -835,6 +835,34 @@ app.get('/api/stats', async (req, res) => {
   }
 });
 
+// ── Live Join Recording: Save new visitors to Supabase ──────────────────────
+app.post('/api/stats/join', async (req, res) => {
+  try {
+    const { name } = req.body;
+    if (!name) return res.status(400).json({ error: 'Name is required' });
+
+    if (!supabase) {
+      console.warn('⚠️ Supabase not connected. Skipping recording of join:', name);
+      return res.status(200).json({ success: true, message: 'Simulated join (DB disconnected)' });
+    }
+
+    const { error } = await supabase
+      .from('users')
+      .insert([{ name, created_at: new Date() }]);
+
+    if (error) {
+      console.error('[API] Error saving join to Supabase:', error.message);
+      return res.status(500).json({ error: 'Database record failed' });
+    }
+
+    console.log(`✨ New founder joined: ${name}`);
+    res.status(200).json({ success: true });
+  } catch (err) {
+    console.error('[API] Join recording error:', err.message);
+    res.status(500).json({ error: 'Server error during join' });
+  }
+});
+
 // ── Reviews API ─────────────────────────────────────────────────────────────
 app.get('/api/reviews', async (req, res) => {
   try {
