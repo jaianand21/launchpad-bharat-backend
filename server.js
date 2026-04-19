@@ -558,13 +558,6 @@ app.post('/api/leads', async (req, res) => {
     
     if (upsertError) throw upsertError;
     
-    // Also record as a 'Join' for the live feed and counter
-    await supabase.from('users').insert([{ 
-      name: name.trim(), 
-      email: email.trim(),
-      created_at: new Date() 
-    }]);
-
     setTimeout(syncLeadsToExcel, 300);
     res.json({ success: true });
   } catch (err) {
@@ -790,6 +783,16 @@ Respond ONLY with this exact JSON structure (all values are strings unless noted
       }
     }
 
+    // ── Record blueprint generation for live stats ─────────────────────────────
+    const { userName } = req.body;
+    if (supabase) {
+      await supabase.from('blueprints_generated').insert([{
+        name: userName || 'Founder',
+        startup_name: blueprintData.startup_name || 'New Stealth Startup',
+        created_at: new Date()
+      }]);
+    }
+
     res.json(blueprintData);
   } catch (err) {
     console.error('[AI] Blueprint Generation Error:', err.message);
@@ -800,34 +803,53 @@ Respond ONLY with this exact JSON structure (all values are strings unless noted
 // ── Stats API ───────────────────────────────────────────────────────────────
 app.get('/api/stats', async (req, res) => {
   try {
-    const { count: usersCount, error: usersErr } = await supabase
-      .from('users')
+    if (!supabase) return res.status(503).json({ error: 'DB not connected' });
+
+    // 1. Count Founders from Leads table
+    const { count: leadsCount, error: leadsErr } = await supabase
+      .from('leads')
       .select('*', { count: 'exact', head: true });
     
+    // 2. Count Blueprints from dedicated blueprints_generated table
+    const { count: bpCount, error: bpErr } = await supabase
+      .from('blueprints_generated')
+      .select('*', { count: 'exact', head: true });
+
+    // 3. Count dynamic resources
     const { count: docsCount, error: docsErr } = await supabase
       .from('documents')
       .select('*', { count: 'exact', head: true });
 
-    // Fetch latest two users for the "Live" labels
-    const { data: latestUsers } = await supabase
-      .from('users')
+    // 4. Fetch latest activities for the labels
+    const { data: latestLeads } = await supabase
+      .from('leads')
       .select('name')
+      .order('joined_at', { ascending: false })
+      .limit(1);
+
+    const { data: latestBps } = await supabase
+      .from('blueprints_generated')
+      .select('name, startup_name')
       .order('created_at', { ascending: false })
-      .limit(2);
+      .limit(1);
 
-    if (usersErr || docsErr) throw usersErr || docsErr;
+    if (leadsErr || bpErr || docsErr) throw (leadsErr || bpErr || docsErr);
 
-    const activeUsers = usersCount || 0;
+    const realFounders = leadsCount || 0;
+    const realBlueprints = bpCount || 0;
     
-    // Adjusted base offsets as per user request
-    const blueprintsGenerated = 247 + (activeUsers * 2.5); 
-    const foundersJoined = 91 + activeUsers;
-    
-    // 95 are static in resourcesData.jsx + dynamic docs in DB
-    const resourcesAdded = 95 + (docsCount || 0);
+    // Adjusted offsets (Base counts + real data)
+    const blueprintsGenerated = 54 + realBlueprints; 
+    const foundersJoined = 91 + realFounders;
+    const resourcesAdded = 110 + (docsCount || 0);
 
-    const latestFounder = latestUsers && latestUsers.length > 0 ? latestUsers[0].name : "Rohan Sharma";
-    const latestBlueprintUser = latestUsers && latestUsers.length > 1 ? latestUsers[1].name : latestFounder;
+    const latestFounder = (latestLeads && latestLeads.length > 0) 
+      ? latestLeads[0].name 
+      : "Be the first to join →";
+
+    const latestBlueprintUser = (latestBps && latestBps.length > 0) 
+      ? `${latestBps[0].name} built ${latestBps[0].startup_name}`
+      : "Latest: AI Startup Blueprint";
 
     res.json({
       blueprints: Math.floor(blueprintsGenerated),
