@@ -558,6 +558,13 @@ app.post('/api/leads', async (req, res) => {
     
     if (upsertError) throw upsertError;
     
+    // Also record as a 'Join' for the live feed and counter
+    await supabase.from('users').insert([{ 
+      name: name.trim(), 
+      email: email.trim(),
+      created_at: new Date() 
+    }]);
+
     setTimeout(syncLeadsToExcel, 300);
     res.json({ success: true });
   } catch (err) {
