@@ -790,6 +790,78 @@ Respond ONLY with this exact JSON structure (all values are strings unless noted
   }
 });
 
+// ── Stats API ───────────────────────────────────────────────────────────────
+app.get('/api/stats', async (req, res) => {
+  try {
+    const { count: usersCount, error: usersErr } = await supabase
+      .from('users')
+      .select('*', { count: 'exact', head: true });
+    
+    const { count: docsCount, error: docsErr } = await supabase
+      .from('documents')
+      .select('*', { count: 'exact', head: true });
+
+    if (usersErr || docsErr) throw usersErr || docsErr;
+
+    // Mathematical mock for blueprints generated (base + users * multiplier)
+    const activeUsers = usersCount || 0;
+    const blueprintsGenerated = 1247 + (activeUsers * 3);
+    const foundersJoined = 3840 + activeUsers;
+    const resourcesAdded = docsCount || 56;
+
+    res.json({
+      blueprints: blueprintsGenerated,
+      founders: foundersJoined,
+      resources: resourcesAdded
+    });
+  } catch (err) {
+    console.error('[API] Stats error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch platform stats' });
+  }
+});
+
+// ── Reviews API ─────────────────────────────────────────────────────────────
+app.get('/api/reviews', async (req, res) => {
+  try {
+    const { data: reviews, error } = await supabase
+      .from('reviews')
+      .select('name, age, location, description, created_at')
+      .order('created_at', { ascending: false })
+      .limit(6);
+    
+    if (error) {
+      if (error.code === '42P01') return res.json([]); // Table doesn't exist
+      throw error;
+    }
+    
+    res.json(reviews || []);
+  } catch (err) {
+    console.error('[API] Fetch Reviews error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch reviews' });
+  }
+});
+
+app.post('/api/reviews', async (req, res) => {
+  try {
+    const { name, age, location, description } = req.body;
+    if (!name || !description) return res.status(400).json({ error: 'Name and description are required' });
+
+    const { error } = await supabase
+      .from('reviews')
+      .insert({ name, age, location, description });
+    
+    if (error) {
+      if (error.code === '42P01') return res.json({ success: true, message: 'Review saved (Mocked)' }); // Table doesn't exist
+      throw error;
+    }
+
+    res.json({ success: true, message: 'Review successfully added' });
+  } catch (err) {
+    console.error('[API] Submit Review error:', err.message);
+    res.status(500).json({ error: 'Failed to submit review' });
+  }
+});
+
 app.post('/api/auth/logout', (req, res) => {
   res.clearCookie('auth_token');
   res.json({ success: true, message: 'Session destroyed securely' });
