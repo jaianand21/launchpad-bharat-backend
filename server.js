@@ -876,8 +876,16 @@ app.post('/api/stats/join', async (req, res) => {
     }
 
     const { error } = await supabase
-      .from('users')
-      .insert([{ name, created_at: new Date() }]);
+      .from('leads')
+      .upsert({ 
+        name: name.trim(),
+        joined_at: new Date().toISOString() 
+      }, { onConflict: 'email' }); // This depends on email being in body, but for simple name sync:
+    
+    // Fallback if email is missing (simple insert for now to match current frontend)
+    if (!req.body.email) {
+      await supabase.from('leads').insert([{ name, joined_at: new Date() }]);
+    }
 
     if (error) {
       console.error('[API] Error saving join to Supabase:', error.message);
