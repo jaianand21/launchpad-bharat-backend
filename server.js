@@ -867,7 +867,7 @@ app.get('/api/stats', async (req, res) => {
 // ── Live Join Recording: Save new visitors to Supabase ──────────────────────
 app.post('/api/stats/join', async (req, res) => {
   try {
-    const { name } = req.body;
+    const { name, email, mobile } = req.body;
     if (!name) return res.status(400).json({ error: 'Name is required' });
 
     if (!supabase) {
@@ -875,17 +875,15 @@ app.post('/api/stats/join', async (req, res) => {
       return res.status(200).json({ success: true, message: 'Simulated join (DB disconnected)' });
     }
 
+    // ── Upsert into Leads table as the primary source of truth ────────────────
     const { error } = await supabase
       .from('leads')
       .upsert({ 
         name: name.trim(),
+        email: email ? email.trim() : `guest_${Date.now()}@launchpadbharat.com`, 
+        mobile: mobile ? mobile.trim() : null,
         joined_at: new Date().toISOString() 
-      }, { onConflict: 'email' }); // This depends on email being in body, but for simple name sync:
-    
-    // Fallback if email is missing (simple insert for now to match current frontend)
-    if (!req.body.email) {
-      await supabase.from('leads').insert([{ name, joined_at: new Date() }]);
-    }
+      }, { onConflict: 'email' });
 
     if (error) {
       console.error('[API] Error saving join to Supabase:', error.message);
