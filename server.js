@@ -60,7 +60,7 @@ const tryGroqKey = async (entry, systemPrompt, userPrompt) => {
   const result = await instance.chat.completions.create({
     messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
     model: entry.model,
-    temperature: 0.85,
+    temperature: 0.95, // Increased to ensure unique ideas
     max_completion_tokens: 4096,
     response_format: { type: 'json_object' }
   });
@@ -69,7 +69,10 @@ const tryGroqKey = async (entry, systemPrompt, userPrompt) => {
 
 const tryGeminiKey = async (entry, systemPrompt, userPrompt) => {
   const genAI = new GoogleGenerativeAI(entry.key);
-  const model = genAI.getGenerativeModel({ model: entry.model });
+  const model = genAI.getGenerativeModel({ 
+    model: entry.model, 
+    generationConfig: { temperature: 0.95, responseMimeType: "application/json" } 
+  });
   const result = await model.generateContent(`${systemPrompt}\n\n${userPrompt}`);
   return result.response.text();
 };
@@ -276,11 +279,17 @@ app.post('/api/auth/verify-otp', async (req, res) => {
 
     await supabase.from('otps').delete().eq('mobile_number', mobile_number);
 
+    // Check if user exists with this mobile number
     let { data: user, error: userError } = await supabase
       .from('users')
       .select('*')
       .eq('mobile_number', mobile_number)
       .maybeSingle();
+
+    if (userError) {
+      console.error('[DB] User fetch error:', userError.message);
+      return res.status(500).json({ error: 'Database error during lookup' });
+    }
 
     if (userError) throw userError;
 
@@ -288,13 +297,23 @@ app.post('/api/auth/verify-otp', async (req, res) => {
       const isNewOrIncomplete = !user.business_stage;
       await supabase
         .from('users')
-        .update({ is_mobile_verified: true, updated_at: new Date().toISOString() })
+        .update({ 
+          is_mobile_verified: true, 
+          updated_at: new Date().toISOString(),
+          last_login: new Date().toISOString()
+        })
         .eq('id', user.id);
       await issueToken(res, user.id, isNewOrIncomplete, user.email, user.name, user.profile_picture);
     } else {
       const { data: newUser, error: createError } = await supabase
         .from('users')
-        .insert({ mobile_number, auth_provider: 'otp', is_mobile_verified: true })
+        .insert({ 
+          mobile_number, 
+          auth_provider: 'otp', 
+          is_mobile_verified: true,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        })
         .select()
         .single();
       
@@ -631,22 +650,21 @@ app.post('/api/generate-blueprint', async (req, res) => {
 
   const systemPrompt = `You are "Launchpad Bharat AI" — India's most brutally honest Startup Architect, built specifically for first-time founders in Tier-2 and Tier-3 Indian cities.
 
-Your personality: You think like a seasoned Indian VC who has seen 1000 pitches fail. You are direct, specific, and ruthlessly practical. You never give generic advice. Every idea you generate must be executable by a solo founder in India with limited resources.
+Your personality: You think like a seasoned Indian VC but speak in very simple, easy-to-understand language. You are direct, specific, and brutally practical. You NEVER give generic advice. 
 
 CORE RULES YOU NEVER BREAK:
-1. ZERO paid tools unless absolutely unavoidable — always suggest free alternatives first
-2. NO domain cost — use Vercel free subdomain or Carrd free tier
-3. NO ad spend — use Instagram Reels, YouTube Shorts, WhatsApp Status, local college/chai-shop outreach
-4. NO paid hosting — Vercel, Railway free tier, Render free tier, Supabase free tier
-5. NO paid email — use Gmail + Brevo free tier (300 emails/day)
-6. If a feature is too expensive — suggest "Wizard of Oz" manual workaround first
-7. EVERY startup idea must be inspired by a REAL foreign model (US/EU/China) not yet in India
-8. EVERY idea must have a WhatsApp-first or offline-first distribution strategy
-9. EVERY startup name must be catchy, short, Hinglish-friendly, and domain-available on Vercel
-10. ALWAYS treat the founder's skill as the #1 competitive moat — build the entire idea around it
-11. NEVER repeat the same startup idea twice — use the founder's unique skill+budget+niche combo to generate a completely fresh concept every time
-12. GST and legal compliance must be mentioned honestly
-13. Be a mentor, not a cheerleader — flag every real risk
+1. ZERO paid tools unless absolutely unavoidable — always suggest free alternatives first.
+2. NO domain cost — use Vercel free subdomain or Carrd free tier.
+3. NO ad spend — use organic distribution like Instagram Reels, YouTube Shorts, WhatsApp Status, local outreach.
+4. NO paid hosting — Vercel, Railway, Render, Supabase free tiers.
+5. NO paid email — use Gmail + Brevo free tier.
+6. EVERY startup idea must be 100% UNIQUE. Never repeat ideas. Blend the user's specific skill and niche into a wildly creative, highly profitable business model that nobody is talking about yet.
+7. ALL content must be DENSE, DETAILED, and ACTIONABLE. Do not give 1-sentence answers. Provide deep context, exact steps, and heavy detail (100-200 words per section) while keeping the language extremely simple.
+8. EVERY idea must have a WhatsApp-first or offline-first distribution strategy.
+9. EVERY startup name must be catchy, short, and available.
+10. Treat the founder's skill as the core competitive moat.
+11. GST and legal compliance must be mentioned honestly.
+12. Be a mentor, flag real risks, and give complete, dense data.
 
 BUDGET LOGIC:
 - Under 5000 INR: Pure service/consulting model, zero product build
@@ -655,37 +673,35 @@ BUDGET LOGIC:
 - 50000-200000 INR: Full MVP with basic automation
 - Above 200000 INR: Product + small team + first paid marketing
 
-OUTPUT FORMAT: Respond ONLY with a valid JSON object. No markdown. No explanation outside JSON. No extra keys. Every value must be exactly the type shown in the schema.`;
+OUTPUT FORMAT: Respond ONLY with a valid JSON object. No markdown. No explanation outside JSON. Every value must be exactly the type shown in the schema.`;
 
-  const userPrompt = `Generate a complete "Launchpad Bharat Blueprint" for this founder:
+  const userPrompt = `Generate a highly detailed, extremely dense "Launchpad Bharat Blueprint" for this founder. The content must be written in easily-digestible, simple English but contain professional-grade detail.
 
 FOUNDER PROFILE:
 - Skills: ${skills}
 - Target Industry/Niche: ${niches}
-- Total Starting Budget: INR ${budget} (HARD LIMIT — do not exceed this in any cost line)
+- Total Starting Budget: INR ${budget} (HARD LIMIT)
 
 YOUR TASK:
-Find ONE highly specific foreign startup (US/EU/China) that is successful but has NOT launched in India. Adapt it completely for the Indian market with a "Desi Touch."
+Generate a completely unique startup idea. Explain exactly what the product is, how it works, and how to sell it. Don't be brief — write dense paragraphs (3-5 sentences) for the problem, solution, and adaptations.
 
-Also add a "founder_tips" section with 5 actionable suggestions that a first-time startup founder in India absolutely needs to know.
-
-Respond ONLY with this exact JSON structure (all values are strings unless noted otherwise):
+Respond ONLY with this exact JSON structure:
 
 {
-  "startup_name": "string — Catchy Hinglish-friendly name, max 2 words",
-  "tagline": "string — One punchy line, max 10 words",
+  "startup_name": "string — Catchy name",
+  "tagline": "string — Punchy one liner",
   "foreign_inspiration": {
     "company": "string — Exact foreign company name",
     "country": "string — Country",
-    "why_not_in_india_yet": "string — Honest 1-sentence reason"
+    "why_not_in_india_yet": "string — Detailed reason"
   },
-  "problem_statement": "string — 3-4 sentences. The EXACT pain point this solves for an Indian Tier-2/3 user. Use real scenarios, not abstract language.",
-  "solution": "string — 3-4 sentences. How the founder's skill directly solves this. Be specific about the user journey from discovery to payment to result.",
+  "problem_statement": "string — Dense 4-5 sentences. Real scenarios of the pain point.",
+  "solution": "string — Dense 4-5 sentences. Exact step-by-step of how the product works.",
   "indian_adaptation": {
-    "distribution": "string — WhatsApp-first or offline-first strategy in detail",
-    "trust_building": "string — How to build trust in a low-trust market (COD, referrals, demos, etc.)",
-    "language": "string — Regional language / Hinglish support plan",
-    "payment": "string — UPI, COD, or instalment strategy"
+    "distribution": "string — Step-by-step WhatsApp/Offline strategy",
+    "trust_building": "string — Dense trust building tactics",
+    "language": "string — Detailed regional language strategy",
+    "payment": "string — Exact pricing and payment collection model"
   },
   "free_tech_stack": {
     "frontend": "string — Tool name + why it is free and suitable",
@@ -795,27 +811,39 @@ Respond ONLY with this exact JSON structure (all values are strings unless noted
     }
 
     // ── Record blueprint generation for live stats ─────────────────────────────
-    const { userName, userEmail, skills, niches, budget } = req.body;
+    const { userName, userEmail, skills, niches, budget, userId } = req.body;
     if (supabase) {
-      await supabase.from('blueprints_generated').insert([{
+      const payload = {
         name: userName || 'Founder',
         email: userEmail || 'N/A',
         skills: skills || 'N/A',
         niches: niches || 'N/A',
         budget: budget || '0',
         startup_name: blueprintData.startup_name || 'New Stealth Startup',
-        created_at: new Date()
-      }]);
+        created_at: new Date().toISOString(),
+        timestamp: new Date().toISOString(), // Supporting legacy & new columns
+        time_stamp: new Date().toISOString()
+      };
+      
+      if (userId) payload.user_id = userId;
+
+      const { error: bpErr } = await supabase.from('blueprints_generated').insert([payload]);
+      if (bpErr) {
+        console.error('[DB] blueprints_generated insert failure:', bpErr);
+      } else {
+        console.log('[DB] Blueprint successfully recorded for:', userName);
+      }
 
       // Enrich main leads table with discovered skills/niches
       if (userEmail && userEmail !== 'N/A') {
-        await supabase.from('leads').upsert({
+        const { error: ldErr } = await supabase.from('leads').upsert({
           name: userName || 'Founder',
           email: userEmail,
           skills: skills || null,
           industry: niches || null,
           joined_at: new Date().toISOString()
         }, { onConflict: 'email' });
+        if (ldErr) console.error('[DB] leads upsert error:', ldErr.message);
       }
     }
 
