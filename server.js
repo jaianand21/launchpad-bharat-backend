@@ -28,6 +28,13 @@ process.on('unhandledRejection', (reason) => {
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+
+// Global Request Logger
+app.use((req, res, next) => {
+  console.log(`[REQUEST] ${req.method} ${req.url} - ${new Date().toISOString()}`);
+  next();
+});
+
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 // ── Multi-Key AI Rotation Pool ───────────────────────────────────────────────
@@ -71,13 +78,15 @@ const callAIWithFallback = async (systemPrompt, userPrompt) => {
   for (let i = 0; i < GROQ_KEY_POOL.length; i++) {
     const index = (groqStartIndex + i) % GROQ_KEY_POOL.length;
     const entry = GROQ_KEY_POOL[index];
+    console.log(`[AI] Attempting Groq key: ${entry.label} (${index+1}/${GROQ_KEY_POOL.length})`);
     try {
       console.log(`[AI] Trying ${entry.label}...`);
-      const text = await tryGroqKey(entry, systemPrompt, userPrompt);
+      const data = await tryGroqKey(entry, systemPrompt, userPrompt);
+      console.log(`[AI] SUCCESS: Groq key ${entry.label} worked.`);
       groqStartIndex = index;
-      console.log(`[AI] ✅ ${entry.label} succeeded.`);
-      return text;
+      return data;
     } catch (err) {
+      console.warn(`[AI] FAILED: Groq key ${entry.label} error: ${err.message}`);
       if (err?.status === 429 || err?.status === 401 || err?.status === 400 || err?.message?.toLowerCase().includes('rate')) {
         console.warn(`[AI] ⚠️ ${entry.label} failed (${err.status || err.message}). Trying next...`);
         groqStartIndex = (index + 1) % GROQ_KEY_POOL.length;
@@ -89,13 +98,15 @@ const callAIWithFallback = async (systemPrompt, userPrompt) => {
   for (let i = 0; i < GEMINI_KEY_POOL.length; i++) {
     const index = (geminiStartIndex + i) % GEMINI_KEY_POOL.length;
     const entry = GEMINI_KEY_POOL[index];
+    console.log(`[AI] Falling back to Gemini key: ${entry.label} (${index+1}/${GEMINI_KEY_POOL.length})`);
     try {
       console.log(`[AI] Trying ${entry.label}...`);
-      const text = await tryGeminiKey(entry, systemPrompt, userPrompt);
+      const data = await tryGeminiKey(entry, systemPrompt, userPrompt);
+      console.log(`[AI] SUCCESS: Gemini key ${entry.label} worked.`);
       geminiStartIndex = index;
-      console.log(`[AI] ✅ ${entry.label} succeeded.`);
-      return text;
+      return data;
     } catch (err) {
+      console.warn(`[AI] FAILED: Gemini key ${entry.label} error: ${err.message}`);
       if (err?.status === 429 || err?.status === 401 || err?.message?.toLowerCase().includes('quota') || err?.message?.toLowerCase().includes('rate')) {
         console.warn(`[AI] ⚠️ ${entry.label} failed (${err.status || err.message}). Trying next...`);
         geminiStartIndex = (index + 1) % GEMINI_KEY_POOL.length;
@@ -784,13 +795,28 @@ Respond ONLY with this exact JSON structure (all values are strings unless noted
     }
 
     // ── Record blueprint generation for live stats ─────────────────────────────
-    const { userName } = req.body;
+    const { userName, userEmail, skills, niches, budget } = req.body;
     if (supabase) {
       await supabase.from('blueprints_generated').insert([{
         name: userName || 'Founder',
+        email: userEmail || 'N/A',
+        skills: skills || 'N/A',
+        niches: niches || 'N/A',
+        budget: budget || '0',
         startup_name: blueprintData.startup_name || 'New Stealth Startup',
         created_at: new Date()
       }]);
+
+      // Enrich main leads table with discovered skills/niches
+      if (userEmail && userEmail !== 'N/A') {
+        await supabase.from('leads').upsert({
+          name: userName || 'Founder',
+          email: userEmail,
+          skills: skills || null,
+          industry: niches || null,
+          joined_at: new Date().toISOString()
+        }, { onConflict: 'email' });
+      }
     }
 
     res.json(blueprintData);
@@ -867,7 +893,7 @@ app.get('/api/stats', async (req, res) => {
 // ── Live Join Recording: Save new visitors to Supabase ──────────────────────
 app.post('/api/stats/join', async (req, res) => {
   try {
-    const { name, email, mobile } = req.body;
+    const { name, email, mobile, skills, domain } = req.body;
     if (!name) return res.status(400).json({ error: 'Name is required' });
 
     if (!supabase) {
@@ -882,6 +908,8 @@ app.post('/api/stats/join', async (req, res) => {
         name: name.trim(),
         email: email ? email.trim() : `guest_${Date.now()}@launchpadbharat.com`, 
         mobile: mobile ? mobile.trim() : null,
+        skills: skills || null,
+        industry: domain || null,
         joined_at: new Date().toISOString() 
       }, { onConflict: 'email' });
 
