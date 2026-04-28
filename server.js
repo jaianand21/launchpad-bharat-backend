@@ -12,8 +12,12 @@ import { fileURLToPath } from 'url';
 import { supabase, initDb } from './db.js';
 import { initScheduler, manuallySyncAllDocuments } from './scheduler.js';
 import { sendOtpSms } from './smsService.js';
+import { sendResetEmail } from './mailService.js';
 import Groq from 'groq-sdk';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
+import validator from 'validator';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 dotenv.config();
@@ -28,6 +32,18 @@ process.on('unhandledRejection', (reason) => {
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+
+// ── Security Headers ─────────────────────────────────────────────────────────
+app.use(helmet());
+
+// ── Global Rate Limiter (100 requests per 15 min per IP) ─────────────────────
+app.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, standardHeaders: true, legacyHeaders: false }));
+
+// ── Strict Rate Limiters for sensitive endpoints ─────────────────────────────
+const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 15, message: { error: 'Too many attempts. Please try again in 15 minutes.' } });
+const aiLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 10, message: { error: 'AI generation limit reached. Please try again in an hour.' } });
+const reviewLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 5, message: { error: 'Review submission limit reached.' } });
 
 // Global Request Logger
 app.use((req, res, next) => {
@@ -167,12 +183,15 @@ const syncLeadsToExcel = async () => {
   }
 };
 
+// ── CORS — only allow localhost in development ──────────────────────────────
+const allowedOrigins = [
+  process.env.FRONTEND_URL,
+  'https://launchpad-bharat.vercel.app'
+].filter(Boolean);
+if (!IS_PRODUCTION) allowedOrigins.push('http://localhost:5173');
+
 app.use(cors({
-  origin: [
-    process.env.FRONTEND_URL, 
-    'https://launchpad-bharat.vercel.app',
-    'http://localhost:5173'
-  ].filter(Boolean),
+  origin: allowedOrigins,
   credentials: true
 }));
 
@@ -186,6 +205,24 @@ const requireAuth = (req, res, next) => {
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    req.userId = decoded.userId;
+    next();
+  } catch (err) {
+    res.status(401).json({ error: 'Unauthorized: Invalid or expired session' });
+  }
+};
+
+// --- Admin Authorization Middleware ---
+const requireAdmin = (req, res, next) => {
+  const token = req.cookies.auth_token;
+  if (!token) return res.status(401).json({ error: 'Unauthorized: No session token provided' });
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const adminIds = (process.env.ADMIN_USER_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
+    if (adminIds.length > 0 && !adminIds.includes(String(decoded.userId))) {
+      return res.status(403).json({ error: 'Forbidden: Admin access required' });
+    }
     req.userId = decoded.userId;
     next();
   } catch (err) {
@@ -340,8 +377,8 @@ const issueToken = async (res, userId, isNewOrIncomplete, email, name, picture) 
   
   res.cookie('auth_token', token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
+    secure: IS_PRODUCTION,
+    sameSite: IS_PRODUCTION ? 'strict' : 'lax',
     maxAge: 7 * 24 * 60 * 60 * 1000
   });
 
@@ -352,15 +389,20 @@ const issueToken = async (res, userId, isNewOrIncomplete, email, name, picture) 
   });
 };
 
-app.post('/api/auth/signup', async (req, res) => {
+app.post('/api/auth/signup', authLimiter, async (req, res) => {
   try {
     const { name, emailOrPhone, password } = req.body;
     if (!name || !emailOrPhone || !password) return res.status(400).json({ error: 'All fields required' });
 
+    // Input validation
+    const safeName = validator.escape(String(name).trim().slice(0, 100));
+    if (!validator.isEmail(String(emailOrPhone))) return res.status(400).json({ error: 'Invalid email format' });
+    if (String(password).length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+
     const hash = await bcrypt.hash(String(password), 10);
     const { data: user, error: signupError } = await supabase
       .from('users')
-      .insert({ name, email: emailOrPhone, auth_provider: 'email', password_hash: hash })
+      .insert({ name: safeName, email: emailOrPhone.trim(), auth_provider: 'email', password_hash: hash })
       .select()
       .single();
     
@@ -374,7 +416,7 @@ app.post('/api/auth/signup', async (req, res) => {
   }
 });
 
-app.post('/api/auth/login', async (req, res) => {
+app.post('/api/auth/login', authLimiter, async (req, res) => {
   const { email, password } = req.body;
   try {
     const { data: user, error: loginError } = await supabase
@@ -396,19 +438,22 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
-app.post('/api/auth/google', async (req, res) => {
+app.post('/api/auth/google', authLimiter, async (req, res) => {
   try {
     const { id_token, mock_profile } = req.body;
     let payload;
 
-    if (id_token && id_token !== 'mock_google_token') {
+    // Only allow mock auth in development — NEVER in production
+    if (!IS_PRODUCTION && id_token === 'mock_google_token') {
+      payload = mock_profile || { sub: 'mock_123', email: 'demo@demo.com', name: 'Demo', picture: null };
+    } else if (id_token) {
       const ticket = await client.verifyIdToken({
         idToken: id_token,
         audience: process.env.GOOGLE_CLIENT_ID,
       });
       payload = ticket.getPayload();
     } else {
-      payload = mock_profile || { sub: 'mock_123', email: 'demo@demo.com', name: 'Demo', picture: null };
+      return res.status(400).json({ error: 'Missing authentication token' });
     }
 
     const { sub: google_id, email, name, picture } = payload;
@@ -505,7 +550,7 @@ app.post('/api/auth/onboard', requireAuth, async (req, res) => {
 });
 
 // ── Forgot Password — Send Reset Code ────────────────────────────────────────
-app.post('/api/auth/forgot-password', async (req, res) => {
+app.post('/api/auth/forgot-password', authLimiter, async (req, res) => {
   const { email } = req.body;
   if (!email) return res.status(400).json({ error: 'Email required' });
 
@@ -521,15 +566,29 @@ app.post('/api/auth/forgot-password', async (req, res) => {
 
     const code = Math.floor(100000 + Math.random() * 900000).toString();
     resetCodes.set(email, { code, expiry: Date.now() + 15 * 60 * 1000, userId: user.id });
-    console.log(`🔑 Reset Code: ${code}`);
-    res.json({ success: true, message: 'Code generated' });
+    // Only log reset code in development — NEVER in production
+    if (!IS_PRODUCTION) console.log(`🔑 [DEV ONLY] Reset Code: ${code}`);
+    
+    // Attempt to send the email
+    const emailResult = await sendResetEmail(email, code);
+    if (!emailResult.success) {
+      // If email fails in production, we should let the user know. 
+      // In development, we might still want to proceed if they just want to see the console log.
+      if (IS_PRODUCTION) {
+        return res.status(502).json({ error: 'Failed to send reset email. Please try again later.' });
+      } else {
+        console.warn(`[DEV ONLY] Email failed, but proceeding since we are in dev mode. Error: ${emailResult.error}`);
+      }
+    }
+
+    res.json({ success: true, message: 'Code sent to email' });
   } catch (err) {
     res.status(500).json({ error: 'Server error' });
   }
 });
 
 // ── Reset Password — Verify Code + Update Hash ────────────────────────────────
-app.post('/api/auth/reset-password', async (req, res) => {
+app.post('/api/auth/reset-password', authLimiter, async (req, res) => {
   const { email, code, newPassword } = req.body;
   const record = resetCodes.get(email);
   if (!record || record.code !== String(code) || Date.now() > record.expiry) {
@@ -552,7 +611,7 @@ app.post('/api/auth/reset-password', async (req, res) => {
 });
 
 // ── Download Users as Excel ───────────────────────────────────────────────────
-app.get('/api/admin/export-users', async (req, res) => {
+app.get('/api/admin/export-users', requireAdmin, async (req, res) => {
   try {
     const { data: rows, error } = await supabase
       .from('users')
@@ -573,16 +632,21 @@ app.get('/api/admin/export-users', async (req, res) => {
 // ── Lead Capture (Welcome Modal) ─────────────────────────────────────────────
 app.post('/api/leads', async (req, res) => {
   const { name, email, mobile, joinedAt } = req.body;
-  console.log(`[LEAD] Incoming lead capture: ${name} (${email})`);
+  console.log(`[LEAD] Incoming lead capture`);
   if (!name || !email || !mobile) return res.status(400).json({ error: 'Missing lead info' });
+
+  // Input validation
+  if (!validator.isEmail(String(email))) return res.status(400).json({ error: 'Invalid email' });
+  const safeName = validator.escape(String(name).trim().slice(0, 100));
+  const safeMobile = validator.escape(String(mobile).trim().slice(0, 15));
 
   try {
     const { error: upsertError } = await supabase
       .from('leads')
       .upsert({ 
-        name: name.trim(), 
+        name: safeName, 
         email: email.trim(), 
-        mobile: mobile.trim(), 
+        mobile: safeMobile, 
         joined_at: joinedAt || new Date().toISOString() 
       }, { onConflict: 'email' });
     
@@ -597,7 +661,7 @@ app.post('/api/leads', async (req, res) => {
 });
 
 // ── Download Leads as Excel ───────────────────────────────────────────────────
-app.get('/api/admin/export-leads', async (req, res) => {
+app.get('/api/admin/export-leads', requireAdmin, async (req, res) => {
   try {
     const { data: rows, error } = await supabase
       .from('leads')
@@ -632,8 +696,7 @@ app.get('/api/documents', async (req, res) => {
   }
 });
 
-app.post('/api/documents/sync', (req, res) => {
-  // Normally protected by isAdmin flag middleware
+app.post('/api/documents/sync', requireAdmin, (req, res) => {
   console.log('[API] Admin authorized manual synchronization sweep across all Founder Documents.');
   manuallySyncAllDocuments();
   res.json({ success: true, message: 'Sync queued successfully' });
@@ -641,7 +704,7 @@ app.post('/api/documents/sync', (req, res) => {
 
 // --- AI Blueprint Generator ---
 
-app.post('/api/generate-blueprint', async (req, res) => {
+app.post('/api/generate-blueprint', aiLimiter, async (req, res) => {
   const { skills, niches, budget } = req.body;
   
   if (!skills || !niches || !budget) {
@@ -975,14 +1038,19 @@ app.get('/api/reviews', async (req, res) => {
   }
 });
 
-app.post('/api/reviews', async (req, res) => {
+app.post('/api/reviews', reviewLimiter, async (req, res) => {
   try {
     const { name, age, location, description } = req.body;
     if (!name || !description) return res.status(400).json({ error: 'Name and description are required' });
 
+    // Input validation & sanitization
+    const safeName = validator.escape(String(name).trim().slice(0, 100));
+    const safeDescription = validator.escape(String(description).trim().slice(0, 1000));
+    const safeLocation = location ? validator.escape(String(location).trim().slice(0, 100)) : null;
+
     const { error } = await supabase
       .from('reviews')
-      .insert({ name, age, location, description });
+      .insert({ name: safeName, age, location: safeLocation, description: safeDescription });
     
     if (error) {
       if (error.code === '42P01') return res.json({ success: true, message: 'Review saved (Mocked)' }); // Table doesn't exist
