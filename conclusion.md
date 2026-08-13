@@ -79,7 +79,7 @@ The core mission of the platform is to democratize startup creation by enabling 
 | **Navbar** | `src/components/Navbar.jsx` | Sticky glassmorphic navbar with active page indicators, language toggle (English/Hindi), saved blueprints counter cart, user avatar dropdown, mobile drawer. |
 | **WelcomeModal** | `src/components/WelcomeModal.jsx` | Lead capture modal shown on first visit (`lb_visitor` localStorage trigger) asking for Name, Email, and Mobile number. |
 | **UpgradeModal** | `src/components/UpgradeModal.jsx` | Premium upgrade modal featuring Razorpay integration, pricing details (`₹499`), and benefit checklist. |
-| **Leadership** | `src/components/Leadership.jsx` | Founder showcase section introducing **Jai Anand** (Founder, CEO & Lead Developer) and **Abhay Bansal** (Co-Founder & Head of Strategy). |
+| **Leadership** | `src/components/Leadership.jsx` | Founder showcase section introducing **Jai Anand** (Founder, CEO & Lead Developer). |
 | **AuthContext** | `src/context/AuthContext.jsx` | Context provider managing user state, session checking (`/api/auth/me`), login/signup methods, and visitor tracking. |
 
 ---
