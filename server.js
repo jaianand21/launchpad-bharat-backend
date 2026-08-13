@@ -18,6 +18,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import validator from 'validator';
+import crypto from 'crypto';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 dotenv.config();
@@ -71,36 +72,43 @@ const GEMINI_KEY_POOL = [
 let groqStartIndex = 0;
 let geminiStartIndex = 0;
 
-const tryGroqKey = async (entry, systemPrompt, userPrompt) => {
+const tryGroqKey = async (entry, systemPrompt, userPrompt, json = true) => {
   const instance = new Groq({ apiKey: entry.key });
-  const result = await instance.chat.completions.create({
+  const params = {
     messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
     model: entry.model,
     temperature: 0.95, // Increased to ensure unique ideas
-    max_completion_tokens: 4096,
-    response_format: { type: 'json_object' }
-  });
+    max_completion_tokens: 4096
+  };
+  if (json) {
+    params.response_format = { type: 'json_object' };
+  }
+  const result = await instance.chat.completions.create(params);
   return result.choices[0].message.content;
 };
 
-const tryGeminiKey = async (entry, systemPrompt, userPrompt) => {
+const tryGeminiKey = async (entry, systemPrompt, userPrompt, json = true) => {
   const genAI = new GoogleGenerativeAI(entry.key);
+  const generationConfig = { temperature: 0.95 };
+  if (json) {
+    generationConfig.responseMimeType = "application/json";
+  }
   const model = genAI.getGenerativeModel({ 
     model: entry.model, 
-    generationConfig: { temperature: 0.95, responseMimeType: "application/json" } 
+    generationConfig
   });
   const result = await model.generateContent(`${systemPrompt}\n\n${userPrompt}`);
   return result.response.text();
 };
 
-const callAIWithFallback = async (systemPrompt, userPrompt) => {
+const callAIWithFallback = async (systemPrompt, userPrompt, json = true) => {
   for (let i = 0; i < GROQ_KEY_POOL.length; i++) {
     const index = (groqStartIndex + i) % GROQ_KEY_POOL.length;
     const entry = GROQ_KEY_POOL[index];
     console.log(`[AI] Attempting Groq key: ${entry.label} (${index+1}/${GROQ_KEY_POOL.length})`);
     try {
       console.log(`[AI] Trying ${entry.label}...`);
-      const data = await tryGroqKey(entry, systemPrompt, userPrompt);
+      const data = await tryGroqKey(entry, systemPrompt, userPrompt, json);
       console.log(`[AI] SUCCESS: Groq key ${entry.label} worked.`);
       groqStartIndex = index;
       return data;
@@ -120,7 +128,7 @@ const callAIWithFallback = async (systemPrompt, userPrompt) => {
     console.log(`[AI] Falling back to Gemini key: ${entry.label} (${index+1}/${GEMINI_KEY_POOL.length})`);
     try {
       console.log(`[AI] Trying ${entry.label}...`);
-      const data = await tryGeminiKey(entry, systemPrompt, userPrompt);
+      const data = await tryGeminiKey(entry, systemPrompt, userPrompt, json);
       console.log(`[AI] SUCCESS: Gemini key ${entry.label} worked.`);
       geminiStartIndex = index;
       return data;
@@ -200,22 +208,40 @@ app.use(cookieParser());
 
 // --- Authentication Middleware ---
 const requireAuth = (req, res, next) => {
-  const token = req.cookies.auth_token;
-  if (!token) return res.status(401).json({ error: 'Unauthorized: No session token provided' });
+  let token = req.cookies?.auth_token;
+  if (!token && req.headers.authorization) {
+    const parts = req.headers.authorization.split(' ');
+    if (parts.length === 2 && parts[0] === 'Bearer') {
+      token = parts[1];
+    }
+  }
+
+  if (!token) return res.status(401).json({ error: 'AUTH_TOKEN_MISSING' });
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     req.userId = decoded.userId;
+    req.user = { id: decoded.userId };
     next();
   } catch (err) {
-    res.status(401).json({ error: 'Unauthorized: Invalid or expired session' });
+    if (err.name === 'TokenExpiredError') {
+      return res.status(401).json({ error: 'AUTH_TOKEN_EXPIRED' });
+    }
+    return res.status(401).json({ error: 'AUTH_TOKEN_INVALID' });
   }
 };
 
 // --- Admin Authorization Middleware ---
 const requireAdmin = (req, res, next) => {
-  const token = req.cookies.auth_token;
-  if (!token) return res.status(401).json({ error: 'Unauthorized: No session token provided' });
+  let token = req.cookies?.auth_token;
+  if (!token && req.headers.authorization) {
+    const parts = req.headers.authorization.split(' ');
+    if (parts.length === 2 && parts[0] === 'Bearer') {
+      token = parts[1];
+    }
+  }
+
+  if (!token) return res.status(401).json({ error: 'AUTH_TOKEN_MISSING' });
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
@@ -224,9 +250,136 @@ const requireAdmin = (req, res, next) => {
       return res.status(403).json({ error: 'Forbidden: Admin access required' });
     }
     req.userId = decoded.userId;
+    req.user = { id: decoded.userId };
     next();
   } catch (err) {
-    res.status(401).json({ error: 'Unauthorized: Invalid or expired session' });
+    if (err.name === 'TokenExpiredError') {
+      return res.status(401).json({ error: 'AUTH_TOKEN_EXPIRED' });
+    }
+    return res.status(401).json({ error: 'AUTH_TOKEN_INVALID' });
+  }
+};
+
+const FREE_BLUEPRINT_LIMIT = 3;
+const FREE_CHAT_LIMIT = 5;
+
+// Middleware to verify plan and blueprint generation limits
+const planCheckMiddleware = async (req, res, next) => {
+  const userId = req.userId;
+
+  if (!supabase) {
+    return next();
+  }
+
+  try {
+    await supabase.rpc('set_config', { key: 'app.current_user_id', value: String(userId) });
+  } catch (rpcErr) {
+    console.warn('[PLAN_CHECK] Failed to set app.current_user_id via RPC:', rpcErr.message);
+  }
+
+  try {
+    let { data: plan, error } = await supabase
+      .from('user_plans')
+      .select('*')
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    // Auto-create plan row for users with no plan row
+    if (!plan || (error && error.code === 'PGRST116')) {
+      const { data: newPlan, error: insertError } = await supabase
+        .from('user_plans')
+        .insert({ user_id: userId, plan: 'free', blueprint_count_this_month: 0 })
+        .select()
+        .single();
+      if (insertError) {
+        console.error('[PLAN_INIT_FAILED] error:', insertError.message);
+        return res.status(500).json({ error: 'PLAN_INIT_FAILED' });
+      }
+      plan = newPlan;
+    } else if (error) {
+      console.error('[PLAN_CHECK] database error:', error.message);
+      return res.status(500).json({ error: 'PLAN_CHECK_FAILED' });
+    }
+
+    if (plan.plan === 'free' && plan.blueprint_count_this_month >= FREE_BLUEPRINT_LIMIT) {
+      return res.status(403).json({
+        error: 'PAYWALL_LIMIT_REACHED',
+        used: plan.blueprint_count_this_month,
+        limit: FREE_BLUEPRINT_LIMIT,
+        message: `You have generated ${FREE_BLUEPRINT_LIMIT}/${FREE_BLUEPRINT_LIMIT} free blueprints this month. Upgrade to Premium for unlimited access.`
+      });
+    }
+
+    req.userPlan = plan;
+    next();
+  } catch (err) {
+    console.error('[PLAN_CHECK] Unexpected error:', err.message);
+    res.status(500).json({ error: 'Server error during plan check' });
+  }
+};
+
+// Middleware to restrict free chat session limit
+const chatLimitMiddleware = async (req, res, next) => {
+  const userId = req.userId;
+
+  if (!supabase) {
+    return next();
+  }
+
+  try {
+    await supabase.rpc('set_config', { key: 'app.current_user_id', value: String(userId) });
+  } catch (rpcErr) {
+    console.warn('[CHAT_LIMIT] Failed to set app.current_user_id via RPC:', rpcErr.message);
+  }
+
+  try {
+    let { data: plan, error } = await supabase
+      .from('user_plans')
+      .select('*')
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    // Auto-create plan row for users with no plan row
+    if (!plan || (error && error.code === 'PGRST116')) {
+      const { data: newPlan, error: insertError } = await supabase
+        .from('user_plans')
+        .insert({ user_id: userId, plan: 'free', chat_message_count_this_session: 0 })
+        .select()
+        .single();
+      if (insertError) {
+        console.error('[PLAN_INIT_FAILED] error:', insertError.message);
+        return res.status(500).json({ error: 'PLAN_INIT_FAILED' });
+      }
+      plan = newPlan;
+    } else if (error) {
+      console.error('[CHAT_LIMIT] database error:', error.message);
+      return res.status(500).json({ error: 'CHAT_LIMIT_FAILED' });
+    }
+
+    if (plan.plan === 'free' && plan.chat_message_count_this_session >= FREE_CHAT_LIMIT) {
+      return res.status(403).json({
+        error: 'CHAT_LIMIT_REACHED',
+        used: plan.chat_message_count_this_session,
+        limit: FREE_CHAT_LIMIT,
+        message: 'You have used 5/5 free chat messages. Upgrade to Premium for unlimited AI Architect access.'
+      });
+    }
+
+    // Increment chat message count
+    const { error: updateError } = await supabase
+      .from('user_plans')
+      .update({ chat_message_count_this_session: plan.chat_message_count_this_session + 1 })
+      .eq('user_id', userId);
+
+    if (updateError) {
+      console.error('[CHAT_LIMIT] Failed to increment count:', updateError.message);
+    }
+
+    req.userPlan = plan;
+    next();
+  } catch (err) {
+    console.error('[CHAT_LIMIT] Unexpected error:', err.message);
+    res.status(500).json({ error: 'Server error during chat check' });
   }
 };
 
@@ -704,7 +857,7 @@ app.post('/api/documents/sync', requireAdmin, (req, res) => {
 
 // --- AI Blueprint Generator ---
 
-app.post('/api/generate-blueprint', aiLimiter, async (req, res) => {
+app.post('/api/generate-blueprint', requireAuth, planCheckMiddleware, aiLimiter, async (req, res) => {
   const { skills, niches, budget } = req.body;
   
   if (!skills || !niches || !budget) {
@@ -908,6 +1061,19 @@ Respond ONLY with this exact JSON structure:
         }, { onConflict: 'email' });
         if (ldErr) console.error('[DB] leads upsert error:', ldErr.message);
       }
+
+      // Increment blueprint count for the user
+      if (req.userPlan) {
+        const { error: incErr } = await supabase
+          .from('user_plans')
+          .update({ blueprint_count_this_month: req.userPlan.blueprint_count_this_month + 1 })
+          .eq('user_id', req.userId);
+        if (incErr) {
+          console.error('[DB] Failed to increment blueprint count:', incErr.message);
+        } else {
+          console.log('[DB] Blueprint count incremented for user:', req.userId);
+        }
+      }
     }
 
     res.json(blueprintData);
@@ -1061,6 +1227,221 @@ app.post('/api/reviews', reviewLimiter, async (req, res) => {
   } catch (err) {
     console.error('[API] Submit Review error:', err.message);
     res.status(500).json({ error: 'Failed to submit review' });
+  }
+});
+
+// ── AI Architect Chat Endpoint ──────────────────────────────────────────────
+app.post('/api/chat-architect', requireAuth, chatLimitMiddleware, async (req, res) => {
+  const { message, history, blueprint } = req.body;
+
+  if (!message) {
+    return res.status(400).json({ error: 'Message is required.' });
+  }
+
+  const systemPrompt = `You are "AI Architect" — the co-founder and mentor for this startup from Launchpad Bharat.
+Your goal is to guide the founder through executing their blueprint: "${blueprint?.startup_name || 'their startup'}".
+You are brutally honest, practical, Indian-focused, and frugal (always suggest free tools first, no paid ads).
+Speak in simple, clear, conversational English. Never give generic business school advice. Give exact step-by-step local execution steps.
+
+Here is the blueprint they generated:
+${JSON.stringify(blueprint, null, 2)}
+
+Answer their question directly and concisely. Do not wrap in JSON. Just return plain text.`;
+
+  const userPrompt = `Chat History:
+${(history || []).map(h => `${h.role === 'user' ? 'Founder' : 'AI Architect'}: ${h.content}`).join('\n')}
+Founder: ${message}
+AI Architect:`;
+
+  try {
+    const aiResponse = await callAIWithFallback(systemPrompt, userPrompt, false);
+    res.json({ response: aiResponse });
+  } catch (err) {
+    console.error('[CHAT-ARCHITECT] Error:', err.message);
+    res.status(500).json({ error: 'Failed to process message. Please try again.' });
+  }
+});
+
+// ── Get User Plan & Limits ───────────────────────────────────────────────────
+app.get('/api/user/plan', requireAuth, async (req, res) => {
+  try {
+    let { data: plan, error } = await supabase
+      .from('user_plans')
+      .select('*')
+      .eq('user_id', req.userId)
+      .maybeSingle();
+
+    if (!plan || (error && error.code === 'PGRST116')) {
+      const { data: newPlan, error: insertError } = await supabase
+        .from('user_plans')
+        .insert({ user_id: req.userId, plan: 'free', blueprint_count_this_month: 0 })
+        .select()
+        .single();
+      if (insertError) throw insertError;
+      plan = newPlan;
+    } else if (error) {
+      throw error;
+    }
+
+    res.json({
+      plan: plan.plan,
+      blueprint_count_this_month: plan.blueprint_count_this_month,
+      chat_message_count_this_session: plan.chat_message_count_this_session
+    });
+  } catch (err) {
+    console.error('[GET-PLAN] Error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch plan' });
+  }
+});
+
+// ── Razorpay Payment & Upgrade ───────────────────────────────────────────────
+app.post('/api/user/upgrade', requireAuth, async (req, res) => {
+  const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
+
+  try {
+    // In development/test mode: skip real verification
+    if (process.env.NODE_ENV !== 'production') {
+      const { error } = await supabase
+        .from('user_plans')
+        .update({ plan: 'premium', upgraded_at: new Date().toISOString() })
+        .eq('user_id', req.userId);
+      
+      if (error) throw error;
+      return res.json({ success: true, plan: 'premium', mode: 'test' });
+    }
+
+    // Production: verify Razorpay HMAC-SHA256 signature
+    const RAZORPAY_SECRET = process.env.RAZORPAY_WEBHOOK_SECRET;
+    if (!RAZORPAY_SECRET) {
+      console.error('[UPGRADE] Missing RAZORPAY_WEBHOOK_SECRET in production');
+      return res.status(500).json({ error: 'RAZORPAY_CONFIG_MISSING' });
+    }
+
+    const body = razorpay_order_id + '|' + razorpay_payment_id;
+    const expectedSignature = crypto
+      .createHmac('sha256', RAZORPAY_SECRET)
+      .update(body)
+      .digest('hex');
+
+    if (expectedSignature !== razorpay_signature) {
+      return res.status(400).json({ error: 'INVALID_PAYMENT_SIGNATURE' });
+    }
+
+    const { error } = await supabase
+      .from('user_plans')
+      .update({ plan: 'premium', upgraded_at: new Date().toISOString() })
+      .eq('user_id', req.userId);
+
+    if (error) throw error;
+
+    return res.json({ success: true, plan: 'premium' });
+  } catch (err) {
+    console.error('[UPGRADE] Error:', err.message);
+    res.status(500).json({ error: 'Upgrade failed' });
+  }
+});
+
+// ── Testimonials Section (GET approved, POST submit) ─────────────────────────
+app.get('/api/testimonials', async (req, res) => {
+  try {
+    const { data: list, error } = await supabase
+      .from('testimonials')
+      .select('id, quote, startup_name, submitted_at, users(name, profile_picture)')
+      .eq('approved', true)
+      .order('submitted_at', { ascending: false });
+
+    if (error) throw error;
+    res.json(list || []);
+  } catch (err) {
+    console.error('[GET-TESTIMONIALS] Error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch testimonials' });
+  }
+});
+
+app.post('/api/testimonials', requireAuth, async (req, res) => {
+  const { quote, startup_name } = req.body;
+
+  if (!quote?.trim()) {
+    return res.status(400).json({ error: 'Quote is required.' });
+  }
+
+  const safeQuote = validator.escape(String(quote).trim().slice(0, 1000));
+  const safeStartupName = startup_name ? validator.escape(String(startup_name).trim().slice(0, 100)) : null;
+
+  try {
+    const { error } = await supabase
+      .from('testimonials')
+      .insert({
+        user_id: req.userId,
+        quote: safeQuote,
+        startup_name: safeStartupName,
+        approved: false // requires admin approval
+      });
+
+    if (error) {
+      // Check if trigger limit error
+      if (error.message && error.message.includes('Testimonial limit reached')) {
+        return res.status(429).json({ error: 'LIMIT_REACHED', message: 'You can submit at most 3 testimonials.' });
+      }
+      throw error;
+    }
+
+    res.json({ success: true, message: 'Testimonial submitted successfully. Pending approval.' });
+  } catch (err) {
+    console.error('[POST-TESTIMONIAL] Error:', err.message);
+    res.status(500).json({ error: 'Failed to submit testimonial' });
+  }
+});
+
+// ── Post-Generation Outcomes Survey (30-day feedback) ───────────────────────
+app.post('/api/blueprint/outcome', requireAuth, async (req, res) => {
+  const { blueprint_id, outcome, rating } = req.body;
+
+  if (!blueprint_id) {
+    return res.status(400).json({ error: 'Blueprint ID is required.' });
+  }
+
+  try {
+    const { error } = await supabase
+      .from('blueprint_outcomes')
+      .insert({
+        user_id: req.userId,
+        blueprint_id,
+        outcome: outcome ? validator.escape(String(outcome).trim()) : null,
+        rating: rating ? parseInt(rating, 10) : null
+      });
+
+    if (error) throw error;
+    res.json({ success: true, message: 'Outcome recorded' });
+  } catch (err) {
+    console.error('[BLUEPRINT-OUTCOME] Error:', err.message);
+    res.status(500).json({ error: 'Failed to record outcome' });
+  }
+});
+
+// ── Save Calculator Inputs & Outputs ─────────────────────────────────────────
+app.post('/api/user/save-calculator', requireAuth, async (req, res) => {
+  const { calculator_type, input_params, result_data } = req.body;
+
+  if (!calculator_type || !input_params || !result_data) {
+    return res.status(400).json({ error: 'All fields are required.' });
+  }
+
+  try {
+    const { error } = await supabase
+      .from('calculator_results')
+      .insert({
+        user_id: req.userId,
+        calculator_type,
+        input_params,
+        result_data
+      });
+
+    if (error) throw error;
+    res.json({ success: true, message: 'Calculator result saved' });
+  } catch (err) {
+    console.error('[SAVE-CALCULATOR] Error:', err.message);
+    res.status(500).json({ error: 'Failed to save calculator results' });
   }
 });
 
