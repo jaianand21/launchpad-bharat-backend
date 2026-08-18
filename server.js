@@ -531,7 +531,7 @@ const issueToken = async (res, userId, isNewOrIncomplete, email, name, picture) 
   res.cookie('auth_token', token, {
     httpOnly: true,
     secure: IS_PRODUCTION,
-    sameSite: IS_PRODUCTION ? 'strict' : 'lax',
+    sameSite: IS_PRODUCTION ? 'none' : 'lax',
     maxAge: 7 * 24 * 60 * 60 * 1000
   });
 
@@ -1446,7 +1446,11 @@ app.post('/api/user/save-calculator', requireAuth, async (req, res) => {
 });
 
 app.post('/api/auth/logout', (req, res) => {
-  res.clearCookie('auth_token');
+  res.clearCookie('auth_token', {
+    httpOnly: true,
+    secure: IS_PRODUCTION,
+    sameSite: IS_PRODUCTION ? 'none' : 'lax'
+  });
   res.json({ success: true, message: 'Session destroyed securely' });
 });
 
