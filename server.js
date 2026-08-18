@@ -58,15 +58,15 @@ const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 const GROQ_KEY_POOL = [
   { key: process.env.GROQ_API_KEY_pvt, model: 'llama-3.3-70b-versatile', label: 'Groq-pvt' },
   { key: process.env.GROQ_API_KEY_eng, model: 'llama-3.3-70b-versatile', label: 'Groq-eng' },
-  { key: process.env.GROQ_API_KEY_3,   model: 'llama3-70b-8192',         label: 'Groq-pool3' },
-  { key: process.env.GROQ_API_KEY_4,   model: 'llama3-8b-8192',          label: 'Groq-pool4' },
+  { key: process.env.GROQ_API_KEY_3 || process.env.GROQ_API_KEY_abhay,   model: 'llama-3.3-70b-versatile',         label: 'Groq-pool3' },
+  { key: process.env.GROQ_API_KEY_4 || process.env.GROQ_API_KEY_abhay_class,   model: 'llama-3.3-70b-versatile',          label: 'Groq-pool4' },
 ].filter(entry => entry.key);
 
 const GEMINI_KEY_POOL = [
-  { key: process.env.GEMINI_API_pvt, model: 'gemini-2.0-flash', label: 'Gemini-pvt' },
-  { key: process.env.GEMINI_API_eng, model: 'gemini-2.0-flash', label: 'Gemini-eng' },
-  { key: process.env.GEMINI_API_3,   model: 'gemini-1.5-flash', label: 'Gemini-pool3' },
-  { key: process.env.GEMINI_API_4,   model: 'gemini-1.5-flash', label: 'Gemini-pool4' },
+  { key: process.env.GEMINI_API_pvt, model: 'gemini-3.6-flash', label: 'Gemini-pvt' },
+  { key: process.env.GEMINI_API_eng, model: 'gemini-3.6-flash', label: 'Gemini-eng' },
+  { key: process.env.GEMINI_API_3 || process.env.GEMINI_API_abhay,   model: 'gemini-3.6-flash', label: 'Gemini-pool3' },
+  { key: process.env.GEMINI_API_4 || process.env.GEMINI_API_abhay_class,   model: 'gemini-3.6-flash', label: 'Gemini-pool4' },
 ].filter(entry => entry.key);
 
 let groqStartIndex = 0;
@@ -114,12 +114,9 @@ const callAIWithFallback = async (systemPrompt, userPrompt, json = true) => {
       return data;
     } catch (err) {
       console.warn(`[AI] FAILED: Groq key ${entry.label} error: ${err.message}`);
-      if (err?.status === 429 || err?.status === 401 || err?.status === 400 || err?.message?.toLowerCase().includes('rate')) {
-        console.warn(`[AI] ⚠️ ${entry.label} failed (${err.status || err.message}). Trying next...`);
-        groqStartIndex = (index + 1) % GROQ_KEY_POOL.length;
-        continue;
-      }
-      throw err;
+      console.warn(`[AI] ⚠️ ${entry.label} failed. Trying next...`);
+      groqStartIndex = (index + 1) % GROQ_KEY_POOL.length;
+      continue;
     }
   }
   for (let i = 0; i < GEMINI_KEY_POOL.length; i++) {
@@ -134,12 +131,9 @@ const callAIWithFallback = async (systemPrompt, userPrompt, json = true) => {
       return data;
     } catch (err) {
       console.warn(`[AI] FAILED: Gemini key ${entry.label} error: ${err.message}`);
-      if (err?.status === 429 || err?.status === 401 || err?.message?.toLowerCase().includes('quota') || err?.message?.toLowerCase().includes('rate')) {
-        console.warn(`[AI] ⚠️ ${entry.label} failed (${err.status || err.message}). Trying next...`);
-        geminiStartIndex = (index + 1) % GEMINI_KEY_POOL.length;
-        continue;
-      }
-      throw err;
+      console.warn(`[AI] ⚠️ ${entry.label} failed. Trying next...`);
+      geminiStartIndex = (index + 1) % GEMINI_KEY_POOL.length;
+      continue;
     }
   }
   throw new Error('Our AI is taking a short break. Please try again in 5 minutes.');
