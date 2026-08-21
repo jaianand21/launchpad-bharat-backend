@@ -531,6 +531,7 @@ const issueToken = async (res, userId, isNewOrIncomplete, email, name, picture) 
 
   res.json({
     success: true,
+    token,
     isNewUser: isNewOrIncomplete,
     user: { id: userId, email, name, picture }
   });
@@ -800,7 +801,36 @@ app.post('/api/leads', async (req, res) => {
     if (upsertError) throw upsertError;
     
     setTimeout(syncLeadsToExcel, 300);
-    res.json({ success: true });
+
+    // Auto-register/login user
+    let { data: user, error: searchError } = await supabase
+      .from('users')
+      .select('*')
+      .eq('email', email.trim())
+      .maybeSingle();
+
+    if (searchError) throw searchError;
+
+    if (!user) {
+      const { data: newUser, error: createError } = await supabase
+        .from('users')
+        .insert({ 
+          name: safeName,
+          email: email.trim(),
+          mobile_number: safeMobile, 
+          auth_provider: 'lead', 
+          is_mobile_verified: true,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        })
+        .select()
+        .single();
+      
+      if (createError) throw createError;
+      user = newUser;
+    }
+
+    await issueToken(res, user.id, !user.business_stage, user.email, user.name, null);
   } catch (err) {
     console.error('[LEAD] Error:', err.message);
     res.status(500).json({ error: 'Lead save failed' });
